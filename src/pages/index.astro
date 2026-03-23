@@ -1,0 +1,225 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircle } from '@lucide/astro';
+---
+
+<Layout title="Telvy">
+  <div id="app" data-state="idle" class="flex flex-col min-h-screen">
+    <!-- Header -->
+    <header class="flex items-center justify-between px-6 py-4 animate-fade-in">
+      <a href="/" class="text-xl font-bold tracking-tight">
+        Tel<span class="text-primary">vy</span>
+      </a>
+      <div class="flex items-center gap-2 text-sm text-gray-500">
+        <svg class="w-4 h-4 rounded-sm" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-label="Swiss flag"><rect width="32" height="32" fill="#D52B1E"/><rect x="13" y="6" width="6" height="20" fill="#fff"/><rect x="6" y="13" width="20" height="6" fill="#fff"/></svg>
+        <span>Hosted in Switzerland</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col items-center justify-center px-4 -mt-16">
+
+      <!-- Room ID (visible in call states) -->
+      <div id="room-display" class="mb-6 text-center hidden animate-fade-in">
+        <p id="room-id" class="text-2xl font-semibold tracking-wide text-gray-800"></p>
+        <div class="flex items-center justify-center gap-2 mt-2">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="status-text" class="text-sm text-gray-500"></span>
+          <span id="verification-code" class="text-sm font-mono text-secure font-medium ml-2 hidden"></span>
+        </div>
+      </div>
+
+      <!-- Central Orb -->
+      <div class="orb-container animate-scale-in">
+        <div class="orb-ring orb-ring-1"></div>
+        <div class="orb-ring orb-ring-2"></div>
+        <div class="orb-ring orb-ring-3"></div>
+        <button id="orb-button" class="orb-button" title="Start a call" aria-label="Start a secure call">
+          <Mic class="w-10 h-10" />
+        </button>
+      </div>
+
+      <!-- Call to Action (landing state) -->
+      <div id="landing-cta" class="mt-8 text-center animate-fade-in-up" style="animation-delay: 0.15s">
+        <p class="text-gray-500 text-lg">Tap to start a secure call</p>
+      </div>
+
+      <!-- Share Link (waiting state) -->
+      <div id="share-section" class="mt-8 text-center hidden">
+        <p class="text-sm text-gray-500 mb-3">Share this link to invite someone</p>
+        <div class="inline-flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-2.5 border border-gray-200">
+          <span id="share-url" class="text-sm font-mono text-gray-700 max-w-xs truncate"></span>
+          <button id="copy-btn" class="text-gray-400 hover:text-primary transition-colors relative" title="Copy link">
+            <span id="copy-icon"><Copy class="w-4 h-4" /></span>
+            <span id="copied-icon" class="hidden"><Check class="w-4 h-4 text-secure" /></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls (call states) -->
+      <div id="controls" class="mt-10 flex items-center gap-3 hidden animate-fade-in-up">
+        <button id="toggle-mic" class="control-btn" title="Toggle microphone">
+          <span id="mic-on"><Mic class="w-5 h-5" /></span>
+          <span id="mic-off" class="hidden"><MicOff class="w-5 h-5" /></span>
+        </button>
+        <button id="toggle-video" class="control-btn" title="Turn on camera">
+          <span id="vid-on" class="hidden"><Video class="w-5 h-5" /></span>
+          <span id="vid-off"><VideoOff class="w-5 h-5" /></span>
+        </button>
+        <button id="copy-link" class="control-btn" title="Copy call link">
+          <Copy class="w-5 h-5" />
+        </button>
+        <button id="hang-up" class="control-btn hang-up" title="End call">
+          <PhoneOff class="w-5 h-5" />
+        </button>
+      </div>
+
+      <!-- Hidden audio element for remote audio playback -->
+      <audio id="remote-audio" autoplay></audio>
+
+      <!-- Video (hidden by default, shown when video toggled) -->
+      <div id="video-section" class="hidden mt-8 w-full max-w-2xl animate-scale-in">
+        <div class="relative aspect-video bg-gray-100 rounded-2xl overflow-hidden border border-gray-200">
+          <video id="remote-video" autoplay playsinline class="w-full h-full object-cover"></video>
+        </div>
+        <div class="absolute bottom-4 right-4 w-40 aspect-video bg-gray-100 rounded-xl overflow-hidden border border-gray-200 shadow-lg">
+          <video id="local-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+        </div>
+      </div>
+
+      <!-- Ended state -->
+      <div id="ended-section" class="mt-8 text-center hidden animate-fade-in">
+        <p class="text-gray-500 text-lg mb-4">Call ended</p>
+        <button id="new-call-btn" class="px-6 py-2.5 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover transition-colors">
+          Start a new call
+        </button>
+      </div>
+    </main>
+
+    <!-- E2EE Badge (shown when connected) -->
+    <div id="e2ee-badge" class="hidden fixed bottom-24 left-1/2 -translate-x-1/2 animate-fade-in">
+      <div class="flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 border border-gray-200 shadow-sm">
+        <Shield class="w-3 h-3 text-secure" />
+        <span id="e2ee-status" class="text-xs text-secure font-medium">E2EE</span>
+      </div>
+    </div>
+
+    <!-- Technical Details -->
+    <section class="px-6 pb-8 max-w-2xl mx-auto w-full animate-fade-in" style="animation-delay: 0.3s">
+      <details class="rounded-xl border border-gray-200 group">
+        <summary class="p-5 cursor-pointer flex items-center justify-between hover:bg-gray-50 rounded-xl transition-colors">
+          <div class="flex items-center gap-3">
+            <Shield class="w-5 h-5 text-gray-400" />
+            <span class="font-semibold text-gray-700">Technical details</span>
+          </div>
+          <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+        </summary>
+        <div class="px-5 pb-5 border-t border-gray-100 pt-4">
+          <ul class="space-y-3 text-sm text-gray-500">
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">End-to-end encrypted</strong> — Only you and the other person hold the keys. No server — not even ours — can decrypt your audio or video. Your call content is completely inaccessible to any third party.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">No logs</strong> — We do not log any call data, connection metadata, IP addresses, or usage analytics. There is no database — nothing to hack, subpoena, or leak.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Full anonymity</strong> — Your IP address is never exposed to the other participant. All media is routed through a TURN relay so neither side learns the other's location or network identity.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Fully hosted in Switzerland</strong> — All infrastructure — signaling, relay, and static assets — is hosted in Switzerland. Your data is subject to Swiss data protection regulations, not US, EU, or any other jurisdiction.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Double encryption</strong> — Every call is protected by two independent encryption layers: WebRTC DTLS-SRTP and an additional AES-256-GCM layer using the Encoded Transform API.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Encrypted signaling</strong> — Connection setup messages are encrypted client-side before reaching any server. Derived via HKDF-SHA256, only someone with your room link can read them.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">TURN relay</strong> — All media is routed through our Swiss-hosted relay. Neither participant reveals their IP address to the other. The relay cannot decrypt any content.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Safety numbers</strong> — A verification code derived from both participants' cryptographic fingerprints (SHA-256) lets you confirm no man-in-the-middle attack occurred.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Metadata minimization</strong> — Internal network addresses and device identifiers are stripped from all connection data before transmission.</span>
+            </li>
+            <li class="flex items-start gap-2">
+              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
+              <span><strong class="text-gray-700">Zero persistence</strong> — Rooms exist only in memory while active. No database, no logs, no analytics. The source code is open for anyone to verify.</span>
+            </li>
+          </ul>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    import { initCall } from '../lib/call';
+    import { generateRoomId } from '../lib/room-id';
+
+    const app = document.getElementById('app')!;
+    const orbButton = document.getElementById('orb-button')!;
+    // If URL has ?room=, auto-join
+    const urlRoom = new URLSearchParams(location.search).get('room');
+    if (urlRoom) {
+      startCall(urlRoom);
+    }
+
+    // Orb click — start a new call
+    orbButton.addEventListener('click', () => {
+      const state = app.dataset.state;
+      if (state === 'idle') {
+        const roomId = generateRoomId();
+        history.pushState(null, '', `?room=${roomId}`);
+        startCall(roomId);
+      }
+    });
+
+    // New call button
+    document.getElementById('new-call-btn')?.addEventListener('click', () => {
+      history.pushState(null, '', '/');
+      resetToLanding();
+    });
+
+    function startCall(roomId: string) {
+      document.getElementById('room-id')!.textContent = roomId;
+      document.getElementById('share-url')!.textContent = `${location.origin}/?room=${roomId}`;
+      document.getElementById('room-display')!.classList.remove('hidden');
+      document.getElementById('share-section')!.classList.remove('hidden');
+      document.getElementById('controls')!.classList.remove('hidden');
+      document.getElementById('landing-cta')!.classList.add('hidden');
+      document.getElementById('ended-section')!.classList.add('hidden');
+      initCall(roomId);
+    }
+
+    function resetToLanding() {
+      app.dataset.state = 'idle';
+      document.getElementById('room-display')!.classList.add('hidden');
+      document.getElementById('share-section')!.classList.add('hidden');
+      document.getElementById('controls')!.classList.add('hidden');
+      document.getElementById('video-section')!.classList.add('hidden');
+      document.getElementById('ended-section')!.classList.add('hidden');
+      document.getElementById('e2ee-badge')!.classList.add('hidden');
+      document.getElementById('landing-cta')!.classList.remove('hidden');
+    }
+
+    // Handle back/forward navigation
+    window.addEventListener('popstate', () => {
+      const room = new URLSearchParams(location.search).get('room');
+      if (room) {
+        startCall(room);
+      } else {
+        resetToLanding();
+      }
+    });
+  </script>
+</Layout>

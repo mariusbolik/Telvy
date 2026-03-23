@@ -1,0 +1,27 @@
+{
+  "name": "telvy",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"astro dev\" \"bun run server/index.ts\"",
+    "dev:astro": "astro dev",
+    "dev:server": "bun run server/index.ts",
+    "build": "astro build",
+    "start": "bun run server/index.ts",
+    "preview": "astro build && astro preview"
+  },
+  "dependencies": {
+    "@lucide/astro": "^0.577.0",
+    "@tailwindcss/vite": "^4.2.2",
+    "astro": "^6.0.8",
+    "express": "^5.2.1",
+    "peerjs": "^1.5.5",
+    "tailwindcss": "^4.2.2",
+    "unique-names-generator": "^4.7.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "concurrently": "^9.2.1",
+    "peer": "^1.0.2"
+  }
+}
