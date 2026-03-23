@@ -16,6 +16,21 @@ The Five Eyes alliance — the US, UK, Canada, Australia, and New Zealand — co
 
 Telvy exists because private conversation shouldn't require trusting a corporation, a government, or a third-party server. It's a simple tool: one link, one call, no accounts, no metadata, no trace. The code is open. The encryption is real. The server is yours.
 
+|  | Telvy | Signal | Matrix | Telegram | WhatsApp | Zoom | Meet | Teams | Jitsi |
+|---|---|---|---|---|---|---|---|---|---|
+| **E2EE default** | ✅ 2 layers | ✅ | ⚠️ opt-in | ⚠️ 1:1 only | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Open source** | ✅ full stack | ✅ full stack | ✅ full stack | ⚠️ client only | ❌ | ❌ | ❌ | ❌ | ✅ full stack |
+| **Self-hostable** | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| **No account needed** | ✅ | ❌ phone # | ❌ email | ❌ phone # | ❌ phone # | ❌ email | ❌ Google | ❌ Microsoft | ✅ |
+| **No app install** | ✅ browser | ❌ | ⚠️ | ❌ | ❌ | ⚠️ | ✅ browser | ⚠️ | ✅ browser |
+| **Server can't see media** | ✅ | ✅ | ⚠️ with E2EE | ⚠️ groups no | ✅ | ❌ | ❌ | ❌ | ❌ SFU decodes |
+| **IP hidden from peer** | ✅ forced relay | ✅ | ⚠️ depends | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **No metadata logging** | ✅ | ⚠️ minimal | ⚠️ depends | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ configurable |
+| **No third-party services** | ✅ | ❌ Google, AWS | ⚠️ depends | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ Google STUN |
+| **Group calls** | ❌ 1:1 only | ✅ 40 | ✅ unlimited | ✅ 1000 | ✅ 32 | ✅ 1000 | ✅ 500 | ✅ 1000 | ✅ 100+ |
+| **Your jurisdiction** | ✅ your choice | ❌ US | ✅ your choice | ❌ UAE | ❌ US | ❌ US | ❌ US | ❌ US | ✅ your choice |
+| **Simple to deploy** | ✅ ~500 LOC | ❌ | ❌ ~500K LOC | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ ~200K LOC |
+
 ## Why Telvy?
 
 Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes your media through their servers. They see your IP, your call metadata, and often your unencrypted media. Telvy doesn't.
@@ -26,6 +41,17 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 - **Swiss hosted** — Self-host on a Swiss VPS for strongest privacy jurisdiction
 - **No persistence** — No database, no logs, no cookies. Room disappears when you hang up
 - **Verification codes** — Both callers see a 6-digit code to confirm no MITM attack
+
+| Feature | Detail |
+|---------|--------|
+| Encryption | DTLS-SRTP + AES-256-GCM (double layer) |
+| IP privacy | Forced TURN relay, peers never learn each other's IP |
+| TURN auth | HMAC-SHA1 credentials, 1-hour TTL, rate-limited |
+| Signaling | PeerServer over WSS (TLS) |
+| Verification | Safety numbers from DTLS fingerprints |
+| Persistence | Zero. No database, no logs, no cookies |
+| External deps | None. No third-party network requests |
+| Jurisdiction | Swiss VPS (not Five Eyes) |
 
 ## How It Works
 
@@ -114,36 +140,6 @@ turnserver -c server/coturn.conf
 ```
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the full hardening checklist.
-
-## Security
-
-| Feature | Detail |
-|---------|--------|
-| Encryption | DTLS-SRTP + AES-256-GCM (double layer) |
-| IP privacy | Forced TURN relay, peers never learn each other's IP |
-| TURN auth | HMAC-SHA1 credentials, 1-hour TTL, rate-limited |
-| Signaling | PeerServer over WSS (TLS) |
-| Verification | Safety numbers from DTLS fingerprints |
-| Persistence | Zero. No database, no logs, no cookies |
-| External deps | None. No third-party network requests |
-| Jurisdiction | Swiss VPS (not Five Eyes) |
-
-## How Telvy Compares
-
-|  | Telvy | Signal | Matrix | Telegram | WhatsApp | Zoom | Meet | Teams | Jitsi |
-|---|---|---|---|---|---|---|---|---|---|
-| **E2EE default** | ✅ 2 layers | ✅ | ⚠️ opt-in | ⚠️ 1:1 only | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Open source** | ✅ full stack | ✅ full stack | ✅ full stack | ⚠️ client only | ❌ | ❌ | ❌ | ❌ | ✅ full stack |
-| **Self-hostable** | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| **No account needed** | ✅ | ❌ phone # | ❌ email | ❌ phone # | ❌ phone # | ❌ email | ❌ Google | ❌ Microsoft | ✅ |
-| **No app install** | ✅ browser | ❌ | ⚠️ | ❌ | ❌ | ⚠️ | ✅ browser | ⚠️ | ✅ browser |
-| **Server can't see media** | ✅ | ✅ | ⚠️ with E2EE | ⚠️ groups no | ✅ | ❌ | ❌ | ❌ | ❌ SFU decodes |
-| **IP hidden from peer** | ✅ forced relay | ✅ | ⚠️ depends | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **No metadata logging** | ✅ | ⚠️ minimal | ⚠️ depends | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ configurable |
-| **No third-party services** | ✅ | ❌ Google, AWS | ⚠️ depends | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ Google STUN |
-| **Group calls** | ❌ 1:1 only | ✅ 40 | ✅ unlimited | ✅ 1000 | ✅ 32 | ✅ 1000 | ✅ 500 | ✅ 1000 | ✅ 100+ |
-| **Your jurisdiction** | ✅ your choice | ❌ US | ✅ your choice | ❌ UAE | ❌ US | ❌ US | ❌ US | ❌ US | ✅ your choice |
-| **Simple to deploy** | ✅ ~500 LOC | ❌ | ❌ ~500K LOC | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ ~200K LOC |
 
 ## Limitations
 
