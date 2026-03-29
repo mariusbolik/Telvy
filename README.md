@@ -47,7 +47,9 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 | Encryption | DTLS-SRTP + AES-256-GCM (double layer) |
 | IP privacy | Forced TURN relay, peers never learn each other's IP |
 | TURN auth | HMAC-SHA1 credentials, 1-hour TTL, rate-limited |
-| Signaling | PeerServer over WSS (TLS) |
+| Signaling | Encrypted WebSocket (AES-256-GCM, HKDF-SHA256 derived key) |
+| Forward secrecy | E2EE key ratcheted every 60s via HKDF chain |
+| Room PINs | Optional PIN for room auth (never sent to server) |
 | Verification | Safety numbers from DTLS fingerprints |
 | Persistence | Zero. No database, no logs, no cookies |
 | External deps | None. No third-party network requests |
@@ -62,9 +64,9 @@ Audio by default. Video optional. One click to end.
 ```
 
 Under the hood:
-1. PeerJS handles WebRTC signaling through your PeerServer
+1. Native WebRTC with encrypted WebSocket signaling (AES-256-GCM, key derived via HKDF-SHA256 from room ID + optional PIN)
 2. Media is forced through your coturn TURN relay (peers never see each other's IP)
-3. An ephemeral AES-256-GCM key encrypts every audio/video frame client-side
+3. E2EE key derived from room ID + PIN via HKDF — never exchanged over the wire. Ratcheted every 60s for forward secrecy
 4. Safety numbers let both parties verify the connection isn't intercepted
 
 ## Quick Start
@@ -83,8 +85,8 @@ Open `http://localhost:4321` in two browser tabs. Click the orb. Share the link.
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Astro 6 (static), Tailwind CSS v4 |
-| WebRTC | PeerJS |
-| Signaling | PeerServer (Express, Bun) |
+| WebRTC | Native RTCPeerConnection |
+| Signaling | WebSocket signaling server (Express + ws, Bun) |
 | TURN/STUN | coturn (self-hosted) |
 | E2EE | AES-256-GCM via Encoded Transform API |
 | Runtime | Bun |
@@ -96,13 +98,13 @@ Open `http://localhost:4321` in two browser tabs. Click the orb. Share the link.
 ```
 src/
   pages/index.astro       Single-page app (all UI states)
-  lib/call.ts             PeerJS call logic, orb reactivity, controls
+  lib/call.ts             WebRTC call logic, encrypted signaling, orb reactivity, controls
   lib/crypto.ts           Verification codes, base64 utils
   lib/e2ee-worker.ts      Frame-level AES-256-GCM encryption
   lib/room-id.ts          Word-based room IDs
   styles/global.css       Tailwind theme, orb animations
 server/
-  index.ts                PeerServer + HMAC TURN credentials API
+  index.ts                WebSocket signaling server (ws) + HMAC TURN credentials API
   coturn.conf             coturn configuration template
 docs/
   SECURITY.md             Full security model and hardening checklist
@@ -111,9 +113,9 @@ docs/
 ## Scripts
 
 ```bash
-bun run dev        # Astro dev (hot reload) + PeerServer
+bun run dev        # Astro dev (hot reload) + signaling server
 bun run build      # Build static site to dist/
-bun run start      # Production PeerServer only
+bun run start      # Production signaling server only
 ```
 
 ## Production Deployment
@@ -121,8 +123,8 @@ bun run start      # Production PeerServer only
 One VPS, three services:
 
 ```
-nginx (443) ──┬── /peerjs/* → PeerServer (9000)
-              ├── /api/*    → PeerServer (9000)
+nginx (443) ──┬── /ws       → signaling server (9000, WebSocket)
+              ├── /api/*    → signaling server (9000)
               └── /*        → static files (dist/)
 
 coturn (3478, 5349) ── STUN/TURN relay
@@ -132,7 +134,7 @@ coturn (3478, 5349) ── STUN/TURN relay
 # Build
 bun run build
 
-# Start PeerServer
+# Start signaling server
 TURN_SECRET=<64-char-random> TURN_DOMAIN=telvy.ch bun run start
 
 # Start coturn (set static-auth-secret to match TURN_SECRET)
@@ -154,4 +156,4 @@ MIT
 
 ---
 
-**Keywords:** WebRTC, peer-to-peer, P2P, encrypted calls, E2EE, end-to-end encryption, private video calls, secure audio calls, self-hosted, open source, no tracking, no logs, Swiss hosting, TURN relay, PeerJS, coturn, Astro, Bun, privacy-first, Signal alternative, Zoom alternative
+**Keywords:** WebRTC, peer-to-peer, P2P, encrypted calls, E2EE, end-to-end encryption, private video calls, secure audio calls, self-hosted, open source, no tracking, no logs, Swiss hosting, TURN relay, coturn, Astro, Bun, privacy-first, Signal alternative, Zoom alternative, forward secrecy, encrypted signaling, HKDF

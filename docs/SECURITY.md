@@ -29,16 +29,22 @@ Telvy is designed so that no party — including the server operator — can acc
 - Keys are never exposed to the server
 - Always active — cannot be disabled
 
-### Layer 2: AES-256-GCM (Insertable Streams E2EE)
+### Layer 2: Encrypted Signaling (AES-256-GCM)
+- All signaling messages (SDP offers/answers, ICE candidates) are encrypted client-side before transmission
+- Encryption key derived via HKDF-SHA256 from room ID + optional PIN
+- The signaling server sees only encrypted blobs — it cannot read SDP or ICE data
+- Prevents the server operator from learning session descriptions or network topology
+
+### Layer 3: AES-256-GCM (Insertable Streams E2EE)
 - Additional frame-level encryption using the WebRTC Encoded Transform API
-- Ephemeral key generated per call by the room creator
-- Key exchanged via PeerJS data connection (over the already-encrypted DTLS channel)
+- Key derived from room ID + optional PIN via HKDF — never exchanged over the wire
+- Both peers independently derive the same key from the shared room URL
 - Each audio/video frame encrypted individually with a counter-based IV
 - Preserves codec headers for browser packetization (10 bytes video, 1 byte audio)
 - Graceful degradation: disabled on browsers without `RTCRtpScriptTransform` support
 
-### Layer 3: TLS (Transport)
-- All signaling between client and PeerServer travels over WSS (WebSocket Secure)
+### Layer 4: TLS (Transport)
+- All signaling between client and server travels over WSS (WebSocket Secure)
 - TURN media relay uses TLS on port 5349 (TURNS)
 
 ## No External Services
@@ -47,7 +53,7 @@ All infrastructure is self-hosted. Zero third-party network requests:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| PeerServer | Swiss VPS | WebRTC signaling |
+| WebSocket signaling server (ws) | Swiss VPS | Encrypted WebRTC signaling |
 | coturn STUN | Swiss VPS | Public IP discovery |
 | coturn TURN | Swiss VPS | Media relay |
 | Static assets | Swiss VPS (nginx) | Frontend files |
@@ -92,6 +98,28 @@ All media is forced through the TURN server via `iceTransportPolicy: 'relay'` (e
 - The TURN server sees both participants' IPs but cannot read the encrypted media
 - Direct P2P connections are never attempted
 
+## Forward Secrecy
+
+The E2EE key is ratcheted every 60 seconds using an HKDF chain:
+
+1. Initial key is derived from room ID + optional PIN via HKDF-SHA256
+2. Every 60 seconds, the current key is fed back into HKDF to produce the next key
+3. The previous key is securely discarded
+4. An attacker who compromises a key can only decrypt the current 60-second window — not past segments
+
+This provides forward secrecy within a call. Even if a key is compromised mid-call, earlier conversation segments remain protected.
+
+## Room PINs
+
+Optional room PINs provide an additional authentication layer:
+
+- Users can set a PIN when creating a room
+- The PIN is appended to the room ID before HKDF key derivation: `HKDF(roomId + PIN)`
+- The PIN is **never sent to the server** — it only exists client-side
+- A user who knows the room URL but not the PIN cannot derive the correct encryption key
+- Without the correct key, signaling messages cannot be decrypted, and E2EE frames are unreadable
+- PINs protect against link-sharing attacks (e.g., a room URL leaked in chat history)
+
 ## Safety Numbers (Key Verification)
 
 After a call connects, both participants see a 6-digit verification code derived from:
@@ -106,7 +134,7 @@ If both participants see the same code, no MITM attack modified the DTLS handsha
 
 ## Zero Persistence
 
-- **PeerServer**: In-memory only. No database, no file storage, no logging
+- **Signaling server**: In-memory only. No database, no file storage, no logging
 - **coturn**: `no-stdout-log` and `no-syslog` — no connection logs written
 - **Frontend**: Static files. No cookies, no localStorage, no analytics
 - **Room state**: Exists only while peers are connected. When the last peer disconnects, the room ceases to exist
@@ -124,9 +152,10 @@ If both participants see the same code, no MITM attack modified the DTLS handsha
 - [ ] Ensure `TURN_SECRET` matches `static-auth-secret` in coturn.conf
 - [ ] Enable TLS on coturn (`cert` and `pkey` in coturn.conf)
 - [ ] Set `external-ip` in coturn.conf to your VPS public IP
-- [ ] Use nginx with TLS (Let's Encrypt) in front of PeerServer
+- [ ] Use nginx with TLS (Let's Encrypt) in front of the signaling server
+- [ ] Configure nginx WebSocket proxying for `/ws` endpoint
 - [x] Enable `iceTransportPolicy: 'relay'` in call.ts for full IP hiding
-- [ ] Run coturn and PeerServer as non-root systemd services
+- [ ] Run coturn and signaling server as non-root systemd services
 - [ ] Enable firewall: only allow ports 443 (HTTPS), 3478 (TURN), 5349 (TURNS)
 - [ ] Regularly rotate `TURN_SECRET` (update both coturn.conf and `TURN_SECRET` env var)
 - [ ] Audit the static build output — ensure no secrets are embedded in client JS
