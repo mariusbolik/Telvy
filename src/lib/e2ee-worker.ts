@@ -1,21 +1,48 @@
-// Web Worker for frame-level AES-256-GCM encryption/decryption
-// Used with the WebRTC Encoded Transform API (RTCRtpScriptTransform)
+// E2EE Web Worker — AES-256-GCM frame encryption with key ratcheting
 
 let encryptionKey: CryptoKey | null = null;
+let currentKeyRaw: ArrayBuffer | null = null;
 let frameCounter = 0;
 
-// Header bytes to preserve unencrypted (browser needs these for packetization)
-const VIDEO_HEADER_SIZE = 10;
-const AUDIO_HEADER_SIZE = 1;
+const VIDEO_HEADER = 10;
+const AUDIO_HEADER = 1;
 const IV_SIZE = 12;
+const RATCHET_INTERVAL = 60_000; // 60 seconds
 
+// Counter-based IV (unique per frame)
 function counterToIv(counter: number): Uint8Array {
   const iv = new Uint8Array(IV_SIZE);
   const view = new DataView(iv.buffer);
-  // Write counter as big-endian 64-bit integer in the last 8 bytes
   view.setUint32(4, Math.floor(counter / 0x100000000), false);
   view.setUint32(8, counter >>> 0, false);
   return iv;
+}
+
+// HKDF key ratchet — deterministic, both peers derive the same sequence
+async function ratchet() {
+  if (!currentKeyRaw) return;
+
+  const ikm = await crypto.subtle.importKey('raw', currentKeyRaw, 'HKDF', false, ['deriveBits']);
+  currentKeyRaw = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new TextEncoder().encode('telvy-ratchet'),
+      info: new TextEncoder().encode('next-key'),
+    },
+    ikm,
+    256,
+  );
+
+  encryptionKey = await crypto.subtle.importKey(
+    'raw',
+    currentKeyRaw,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+
+  frameCounter = 0;
 }
 
 async function encryptFrame(
@@ -23,42 +50,26 @@ async function encryptFrame(
   controller: TransformStreamDefaultController,
   kind: string,
 ) {
-  if (!encryptionKey) {
-    controller.enqueue(frame);
-    return;
-  }
+  if (!encryptionKey) { controller.enqueue(frame); return; }
 
-  const headerSize = kind === 'video' ? VIDEO_HEADER_SIZE : AUDIO_HEADER_SIZE;
+  const headerSize = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
   const data = new Uint8Array(frame.data);
-
-  if (data.byteLength <= headerSize) {
-    controller.enqueue(frame);
-    return;
-  }
+  if (data.byteLength <= headerSize) { controller.enqueue(frame); return; }
 
   const header = data.slice(0, headerSize);
   const payload = data.slice(headerSize);
   const iv = counterToIv(frameCounter++);
 
   try {
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      encryptionKey,
-      payload,
-    );
+    const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, encryptionKey, payload);
+    const out = new Uint8Array(headerSize + IV_SIZE + enc.byteLength);
+    out.set(header, 0);
+    out.set(iv, headerSize);
+    out.set(new Uint8Array(enc), headerSize + IV_SIZE);
+    frame.data = out.buffer;
+  } catch { /* pass through on error */ }
 
-    // Output: header || iv(12B) || ciphertext+tag
-    const output = new Uint8Array(header.byteLength + IV_SIZE + encrypted.byteLength);
-    output.set(header, 0);
-    output.set(iv, header.byteLength);
-    output.set(new Uint8Array(encrypted), header.byteLength + IV_SIZE);
-
-    frame.data = output.buffer;
-    controller.enqueue(frame);
-  } catch {
-    // On error, pass frame through unencrypted
-    controller.enqueue(frame);
-  }
+  controller.enqueue(frame);
 }
 
 async function decryptFrame(
@@ -66,74 +77,52 @@ async function decryptFrame(
   controller: TransformStreamDefaultController,
   kind: string,
 ) {
-  if (!encryptionKey) {
-    controller.enqueue(frame);
-    return;
-  }
+  if (!encryptionKey) { controller.enqueue(frame); return; }
 
-  const headerSize = kind === 'video' ? VIDEO_HEADER_SIZE : AUDIO_HEADER_SIZE;
+  const headerSize = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
   const data = new Uint8Array(frame.data);
-
-  if (data.byteLength <= headerSize + IV_SIZE) {
-    controller.enqueue(frame);
-    return;
-  }
+  if (data.byteLength <= headerSize + IV_SIZE) { controller.enqueue(frame); return; }
 
   const header = data.slice(0, headerSize);
   const iv = data.slice(headerSize, headerSize + IV_SIZE);
   const ciphertext = data.slice(headerSize + IV_SIZE);
 
   try {
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      encryptionKey,
-      ciphertext,
-    );
+    const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, encryptionKey, ciphertext);
+    const out = new Uint8Array(headerSize + dec.byteLength);
+    out.set(header, 0);
+    out.set(new Uint8Array(dec), headerSize);
+    frame.data = out.buffer;
+  } catch { /* pass through — key mismatch during ratchet transition */ }
 
-    // Reconstruct: header || plaintext
-    const output = new Uint8Array(header.byteLength + decrypted.byteLength);
-    output.set(header, 0);
-    output.set(new Uint8Array(decrypted), header.byteLength);
-
-    frame.data = output.buffer;
-    controller.enqueue(frame);
-  } catch {
-    // Decryption failed — frame might not be encrypted yet (key exchange in progress)
-    controller.enqueue(frame);
-  }
+  controller.enqueue(frame);
 }
 
-// Handle RTCRtpScriptTransform events
+// RTCRtpScriptTransform handler
 self.addEventListener('rtctransform', ((event: Event) => {
-  const rtcEvent = event as RTCTransformEvent;
-  const { readable, writable } = rtcEvent.transformer;
-  const options = rtcEvent.transformer.options as { direction: string; kind: string };
-  const direction = options?.direction || 'encrypt';
-  const kind = options?.kind || 'video';
+  const rtc = event as RTCTransformEvent;
+  const { readable, writable } = rtc.transformer;
+  const opts = rtc.transformer.options as { direction: string; kind: string };
+  const dir = opts?.direction || 'encrypt';
+  const kind = opts?.kind || 'video';
 
-  const transform = new TransformStream({
-    transform(frame, controller) {
-      if (direction === 'encrypt') {
-        return encryptFrame(frame, controller, kind);
-      } else {
-        return decryptFrame(frame, controller, kind);
-      }
-    },
-  });
-
-  readable.pipeThrough(transform).pipeTo(writable);
+  readable.pipeThrough(new TransformStream({
+    transform: (frame, ctrl) => dir === 'encrypt'
+      ? encryptFrame(frame, ctrl, kind)
+      : decryptFrame(frame, ctrl, kind),
+  })).pipeTo(writable);
 }) as EventListener);
 
-// Handle key updates from main thread
+// Key setup + ratchet timer
 self.addEventListener('message', async (event: MessageEvent) => {
   if (event.data.type === 'setKey') {
+    currentKeyRaw = event.data.key;
     encryptionKey = await crypto.subtle.importKey(
-      'raw',
-      event.data.key,
-      { name: 'AES-GCM' },
-      false,
-      ['encrypt', 'decrypt'],
+      'raw', currentKeyRaw!, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'],
     );
     frameCounter = 0;
+
+    // Start deterministic ratchet — both peers ratchet at same interval
+    setInterval(ratchet, RATCHET_INTERVAL);
   }
 });
