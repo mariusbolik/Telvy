@@ -69,10 +69,13 @@ Almost, but not quite. VPN requires both users to have one, configure it, and tr
 An optional authentication layer. When creating a room, you can set a PIN. The PIN is appended to the room ID before HKDF key derivation (`HKDF(roomId + PIN)`), so it affects both the signaling encryption key and the E2EE key. The PIN is **never sent to the server** — it only exists client-side. Without the correct PIN, a user cannot decrypt signaling messages or media frames, even if they know the room URL.
 
 ### What is forward secrecy and how does Telvy implement it?
-Forward secrecy means that compromising a current encryption key does not expose past communications. Telvy ratchets the E2EE key every 60 seconds using an HKDF chain: the current key is fed into HKDF to derive the next key, and the old key is discarded. If an attacker compromises a key mid-call, they can only decrypt the current 60-second window — not any previous segments.
+Forward secrecy means that compromising a current encryption key does not expose past communications. Telvy implements SFrame (RFC 9605) with key ratcheting: the base key is fed into HKDF every 60 seconds to derive the next key (`Expand(secret, 'ratchet')`), the Key ID (KID) is incremented, and the old key is discarded. If an attacker compromises a key mid-call, they can only decrypt the current 60-second window — not any previous segments.
 
 ### How is the E2EE key derived?
-The key is derived client-side from the room ID + optional PIN using HKDF-SHA256. Both peers independently compute the same key from the shared URL (and PIN, if set). No key material is ever exchanged over the wire — not even over an encrypted channel. This eliminates key-exchange attacks entirely.
+The base key is derived client-side from the room ID + optional PIN using HKDF-SHA256. From this base key, SFrame derives the actual encryption key and salt per RFC 9605: `Extract('SFrame10', base_key)` → `Expand(secret, 'key')` + `Expand(secret, 'salt')`. Both peers independently compute the same keys. No key material is ever exchanged over the wire.
+
+### What is SFrame?
+SFrame (Secure Frame, RFC 9605) is the IETF standard for end-to-end encrypted real-time media. It defines the frame format, key derivation (HKDF), nonce construction (salt XOR counter), authenticated encryption (AES-GCM with SFrame header as AAD), and key ratcheting. Telvy implements SFrame instead of a custom encryption scheme — this means the encryption format is standardized, publicly reviewed, and interoperable.
 
 ### Is the signaling encrypted?
 Yes. All signaling messages (SDP offers/answers, ICE candidates) are encrypted client-side with AES-256-GCM before being sent over WebSocket. The encryption key is derived via HKDF-SHA256 from the room ID + optional PIN. The signaling server only sees encrypted blobs and the room ID (used for routing).

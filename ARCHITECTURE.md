@@ -61,7 +61,7 @@ All infrastructure is self-hosted on a single Swiss VPS. No third-party servers 
 
 6. **Media** — Audio (and optionally video) flows between browsers. With `iceTransportPolicy: 'relay'`, all media routes through coturn. The TURN server relays encrypted packets it cannot read.
 
-7. **E2EE** — Frame-level encryption using AES-256-GCM via the Encoded Transform API. The key is derived from the room ID + optional PIN via HKDF — never exchanged over the wire. The key is ratcheted every 60 seconds via an HKDF chain for forward secrecy.
+7. **E2EE** — Frame-level encryption using SFrame (RFC 9605) via the Encoded Transform API. Uses AES-256-GCM with SFrame header as authenticated data. The key is derived from the room ID + optional PIN via HKDF — never exchanged over the wire. The key is ratcheted every 60 seconds per the SFrame ratchet mechanism for forward secrecy.
 
 8. **Teardown** — When users hang up, all streams stop, the connection is closed, and the room ceases to exist. Nothing is persisted.
 
@@ -98,10 +98,12 @@ Telvy/
 │       │                        - stripSdp() / shouldDropCandidate()
 │       │                        - arrayBufferToBase64() / base64ToArrayBuffer()
 │       │
-│       ├── e2ee-worker.ts       Web Worker for frame encryption
-│       │                        - AES-256-GCM per-frame encrypt/decrypt
-│       │                        - Preserves codec headers (10B video, 1B audio)
-│       │                        - Counter-based IV (no repeats)
+│       ├── e2ee-worker.ts       SFrame (RFC 9605) frame encryption
+│       │                        - AES-256-GCM with SFrame header as AAD
+│       │                        - HKDF key derivation per spec (Extract/Expand)
+│       │                        - Variable-length SFrame header (KID + CTR)
+│       │                        - Nonce = sframe_salt XOR counter
+│       │                        - Key ratcheting every 60s with KID increment
 │       │
 │       └── room-id.ts           Room ID generator (unique-names-generator)
 │
@@ -137,7 +139,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 | Layer | What it protects | How |
 |-------|-----------------|-----|
 | **DTLS-SRTP** | Media transport | Built into WebRTC (always on) |
-| **E2EE** | Audio/video content | AES-256-GCM frame encryption via Encoded Transform API |
+| **E2EE** | Audio/video content | SFrame (RFC 9605) via Encoded Transform API |
 | **Encrypted signaling** | SDP/ICE exchange | AES-256-GCM encrypted client-side (HKDF-SHA256 from room ID + PIN) |
 | **Forward secrecy** | Past call segments | E2EE key ratcheted every 60s via HKDF chain |
 | **Room PINs** | Room authentication | Optional PIN appended to room ID before HKDF — never sent to server |

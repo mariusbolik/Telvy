@@ -18,7 +18,7 @@ Browser-based 1:1 calling app. Audio-first, video optional. Single-page Astro st
 
 - `src/lib/call.ts` — Core call logic: native WebRTC, encrypted WS signaling, HKDF key derivation, audio/video, orb reactivity, E2EE, UI controls
 - `src/lib/crypto.ts` — Verification codes (SHA-256 from DTLS fingerprints), base64 utils
-- `src/lib/e2ee-worker.ts` — Web Worker for AES-256-GCM frame encryption (Encoded Transform API)
+- `src/lib/e2ee-worker.ts` — SFrame (RFC 9605) frame encryption with HKDF key ratcheting
 - `src/lib/room-id.ts` — Word-based room ID generation (unique-names-generator)
 - `src/pages/index.astro` — Single page: all UI states (idle, waiting, connected, disconnected)
 - `server/index.ts` — WebSocket signaling server (Express + ws) + TURN credentials API (rate-limited)
@@ -44,7 +44,7 @@ No external services — zero third-party network requests.
 - No external servers (no Google STUN, no CDN, no analytics)
 - No logging on signaling server or coturn
 - TURN credentials are HMAC-SHA1, 1-hour TTL, rate-limited
-- E2EE via Encoded Transform API (AES-256-GCM per frame)
+- E2EE via SFrame (RFC 9605) with AES-256-GCM and HKDF key ratcheting
 - `prefers-reduced-motion` respected
 - All controls have ARIA labels
 

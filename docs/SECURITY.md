@@ -35,11 +35,14 @@ Telvy is designed so that no party — including the server operator — can acc
 - The signaling server sees only encrypted blobs — it cannot read SDP or ICE data
 - Prevents the server operator from learning session descriptions or network topology
 
-### Layer 3: AES-256-GCM (Insertable Streams E2EE)
-- Additional frame-level encryption using the WebRTC Encoded Transform API
-- Key derived from room ID + optional PIN via HKDF — never exchanged over the wire
-- Both peers independently derive the same key from the shared room URL
-- Each audio/video frame encrypted individually with a counter-based IV
+### Layer 3: SFrame (RFC 9605)
+- Frame-level encryption per the IETF Secure Frame standard (RFC 9605)
+- AES-256-GCM with SFrame header as Additional Authenticated Data (AAD)
+- Key derived via HKDF: `Extract('SFrame10', base_key)` → `Expand(secret, 'key')` + `Expand(secret, 'salt')`
+- Base key derived from room ID + optional PIN — never exchanged over the wire
+- Nonce constructed as `sframe_salt XOR counter` (per spec Section 4.4.3)
+- Variable-length SFrame header encodes Key ID (KID) and frame counter (CTR)
+- Key ratcheted every 60s via `Expand(secret, 'ratchet')` with KID increment
 - Preserves codec headers for browser packetization (10 bytes video, 1 byte audio)
 - Graceful degradation: disabled on browsers without `RTCRtpScriptTransform` support
 

@@ -35,7 +35,7 @@ Telvy exists because private conversation shouldn't require trusting a corporati
 
 Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes your media through their servers. They see your IP, your call metadata, and often your unencrypted media. Telvy doesn't.
 
-- **E2E encrypted** — Two encryption layers: WebRTC DTLS-SRTP + AES-256-GCM frame encryption
+- **E2E encrypted** — Two encryption layers: WebRTC DTLS-SRTP + SFrame (RFC 9605) frame encryption
 - **No servers in the media path** — All traffic relayed through your own TURN server (encrypted, unreadable)
 - **Zero third-party requests** — No Google STUN, no CDN, no analytics, no external fonts
 - **Swiss hosted** — Self-host on a Swiss VPS for strongest privacy jurisdiction
@@ -88,7 +88,7 @@ Open `http://localhost:4321` in two browser tabs. Click the orb. Share the link.
 | WebRTC | Native RTCPeerConnection |
 | Signaling | WebSocket signaling server (Express + ws, Bun) |
 | TURN/STUN | coturn (self-hosted) |
-| E2EE | AES-256-GCM via Encoded Transform API |
+| E2EE | SFrame (RFC 9605) via Encoded Transform API |
 | Runtime | Bun |
 
 ~500 lines of application code. No frameworks. No build complexity.
@@ -100,7 +100,7 @@ src/
   pages/index.astro       Single-page app (all UI states)
   lib/call.ts             WebRTC call logic, encrypted signaling, orb reactivity, controls
   lib/crypto.ts           Verification codes, base64 utils
-  lib/e2ee-worker.ts      Frame-level AES-256-GCM encryption
+  lib/e2ee-worker.ts      SFrame (RFC 9605) frame encryption with key ratcheting
   lib/room-id.ts          Word-based room IDs
   styles/global.css       Tailwind theme, orb animations
 server/
@@ -148,7 +148,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full hardening checklist.
 - **1:1 calls only** — P2P architecture doesn't scale to group calls
 - **Browser-based** — No native mobile app (works in mobile browsers)
 - **Requires TURN server** — Forced relay means your VPS handles all media bandwidth
-- **E2EE browser support** — Encoded Transform API requires Chrome 110+, Safari 15.4+, Firefox 117+
+- **E2EE browser support** — SFrame via Encoded Transform API requires Chrome 110+, Safari 15.4+, Firefox 117+
 
 ## License
 
