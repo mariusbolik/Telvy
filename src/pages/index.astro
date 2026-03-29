@@ -44,6 +44,12 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
         <p class="text-gray-500 text-lg">Tap to start a secure call</p>
       </div>
 
+      <!-- Optional PIN (visible before and during call) -->
+      <div id="pin-section" class="mt-4 animate-fade-in">
+        <input id="room-pin" type="password" placeholder="Optional PIN" maxlength="32" autocomplete="off"
+          class="text-center text-sm bg-gray-50 rounded-lg px-4 py-2 border border-gray-200 w-40 focus:outline-none focus:border-primary/50 transition-colors" />
+      </div>
+
       <!-- Share Link (waiting state) -->
       <div id="share-section" class="mt-8 text-center hidden">
         <p class="text-sm text-gray-500 mb-3">Share this link to invite someone</p>
@@ -191,6 +197,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
     });
 
     function startCall(roomId: string) {
+      const pin = (document.getElementById('room-pin') as HTMLInputElement)?.value || undefined;
       document.getElementById('room-id')!.textContent = roomId;
       document.getElementById('share-url')!.textContent = `${location.origin}/?room=${roomId}`;
       document.getElementById('room-display')!.classList.remove('hidden');
@@ -198,7 +205,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       document.getElementById('controls')!.classList.remove('hidden');
       document.getElementById('landing-cta')!.classList.add('hidden');
       document.getElementById('ended-section')!.classList.add('hidden');
-      initCall(roomId);
+      initCall(roomId, pin);
     }
 
     function resetToLanding() {

@@ -8,13 +8,8 @@ export default defineConfig({
     plugins: [tailwindcss()],
     server: {
       proxy: {
-        '/peerjs': {
-          target: 'http://localhost:9000',
-          ws: true,
-        },
-        '/api': {
-          target: 'http://localhost:9000',
-        },
+        '/ws': { target: 'http://localhost:9000', ws: true },
+        '/api': { target: 'http://localhost:9000' },
       },
     },
   },
