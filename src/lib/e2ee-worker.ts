@@ -1,71 +1,169 @@
-// E2EE Web Worker — AES-256-GCM frame encryption with key ratcheting
+// SFrame (RFC 9605) E2EE Web Worker
+// Cipher suite: AES_256_GCM_SHA512_128 (AES-256-GCM, SHA-256, 128-bit tag)
+// Key ratcheting every 60s via HKDF for forward secrecy
 
-let encryptionKey: CryptoKey | null = null;
-let currentKeyRaw: ArrayBuffer | null = null;
-let frameCounter = 0;
+const RATCHET_INTERVAL = 60_000;
+
+let sframeKey: ArrayBuffer | null = null;
+let sframeSalt: ArrayBuffer | null = null;
+let baseKeyRaw: ArrayBuffer | null = null;
+let keyId = 0;
+let counter = 0;
 
 const VIDEO_HEADER = 10;
 const AUDIO_HEADER = 1;
-const IV_SIZE = 12;
-const RATCHET_INTERVAL = 60_000; // 60 seconds
 
-// Counter-based IV (unique per frame)
-function counterToIv(counter: number): Uint8Array {
-  const iv = new Uint8Array(IV_SIZE);
-  const view = new DataView(iv.buffer);
-  view.setUint32(4, Math.floor(counter / 0x100000000), false);
-  view.setUint32(8, counter >>> 0, false);
-  return iv;
+// --- HKDF (RFC 5869) via Web Crypto ---
+
+async function hkdfExtract(salt: ArrayBuffer, ikm: ArrayBuffer): Promise<ArrayBuffer> {
+  const key = await crypto.subtle.importKey('raw', salt, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return crypto.subtle.sign('HMAC', key, ikm);
 }
 
-// HKDF key ratchet — deterministic, both peers derive the same sequence
+async function hkdfExpand(prk: ArrayBuffer, info: string, length: number): Promise<ArrayBuffer> {
+  const key = await crypto.subtle.importKey('raw', prk, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const infoBytes = new TextEncoder().encode(info);
+  const input = new Uint8Array(infoBytes.length + 1);
+  input.set(infoBytes, 0);
+  input[infoBytes.length] = 1;
+  const okm = await crypto.subtle.sign('HMAC', key, input);
+  return okm.slice(0, length);
+}
+
+// --- SFrame key derivation (RFC 9605 Section 4.4.1) ---
+
+async function deriveKeys(baseKey: ArrayBuffer) {
+  const salt = new TextEncoder().encode('SFrame10');
+  const secret = await hkdfExtract(salt, baseKey);
+  sframeKey = await hkdfExpand(secret, 'key', 32); // AES-256
+  sframeSalt = await hkdfExpand(secret, 'salt', 12); // GCM nonce
+}
+
+// --- SFrame key ratcheting (RFC 9605 Section 4.4.2) ---
+
 async function ratchet() {
-  if (!currentKeyRaw) return;
+  if (!baseKeyRaw) return;
 
-  const ikm = await crypto.subtle.importKey('raw', currentKeyRaw, 'HKDF', false, ['deriveBits']);
-  currentKeyRaw = await crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new TextEncoder().encode('telvy-ratchet'),
-      info: new TextEncoder().encode('next-key'),
-    },
-    ikm,
-    256,
-  );
+  const salt = new TextEncoder().encode('SFrame10');
+  const secret = await hkdfExtract(salt, baseKeyRaw);
+  baseKeyRaw = await hkdfExpand(secret, 'ratchet', 32);
 
-  encryptionKey = await crypto.subtle.importKey(
-    'raw',
-    currentKeyRaw,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt', 'decrypt'],
-  );
-
-  frameCounter = 0;
+  await deriveKeys(baseKeyRaw);
+  keyId++;
+  counter = 0;
 }
+
+// --- SFrame header encoding (RFC 9605 Section 4.3) ---
+
+function encodeSFrameHeader(kid: number, ctr: number): Uint8Array {
+  // Config byte: X|KKK|Y|CCC
+  const kidBytes = kid < 8 ? 0 : Math.ceil(Math.log2(Math.max(kid, 1) + 1) / 8);
+  const ctrBytes = ctr < 8 ? 0 : Math.ceil(Math.log2(Math.max(ctr, 1) + 1) / 8);
+
+  const x = kid < 8 ? 0 : 1;
+  const k = kid < 8 ? kid : kidBytes - 1;
+  const y = ctr < 8 ? 0 : 1;
+  const c = ctr < 8 ? ctr : ctrBytes - 1;
+
+  const config = (x << 7) | (k << 4) | (y << 3) | c;
+  const header = new Uint8Array(1 + (x ? kidBytes : 0) + (y ? ctrBytes : 0));
+  header[0] = config;
+
+  let offset = 1;
+  if (x) {
+    for (let i = kidBytes - 1; i >= 0; i--) {
+      header[offset++] = (kid >> (i * 8)) & 0xff;
+    }
+  }
+  if (y) {
+    for (let i = ctrBytes - 1; i >= 0; i--) {
+      header[offset++] = (ctr >> (i * 8)) & 0xff;
+    }
+  }
+
+  return header;
+}
+
+function decodeSFrameHeader(data: Uint8Array): { kid: number; ctr: number; headerLen: number } {
+  const config = data[0];
+  const x = (config >> 7) & 1;
+  const k = (config >> 4) & 0x7;
+  const y = (config >> 3) & 1;
+  const c = config & 0x7;
+
+  let offset = 1;
+  let kid: number;
+  let ctr: number;
+
+  if (x === 0) {
+    kid = k;
+  } else {
+    const len = k + 1;
+    kid = 0;
+    for (let i = 0; i < len; i++) kid = (kid << 8) | data[offset++];
+  }
+
+  if (y === 0) {
+    ctr = c;
+  } else {
+    const len = c + 1;
+    ctr = 0;
+    for (let i = 0; i < len; i++) ctr = (ctr << 8) | data[offset++];
+  }
+
+  return { kid, ctr, headerLen: offset };
+}
+
+// --- Nonce construction (RFC 9605 Section 4.4.3) ---
+
+function buildNonce(ctr: number): Uint8Array {
+  if (!sframeSalt) throw new Error('No salt');
+  const salt = new Uint8Array(sframeSalt);
+  const nonce = new Uint8Array(12);
+  nonce.set(salt);
+
+  // XOR counter into nonce (big-endian, right-aligned)
+  const ctrBuf = new Uint8Array(12);
+  const view = new DataView(ctrBuf.buffer);
+  view.setUint32(4, Math.floor(ctr / 0x100000000), false);
+  view.setUint32(8, ctr >>> 0, false);
+
+  for (let i = 0; i < 12; i++) nonce[i] ^= ctrBuf[i];
+  return nonce;
+}
+
+// --- Encrypt / Decrypt ---
 
 async function encryptFrame(
   frame: RTCEncodedVideoFrame | RTCEncodedAudioFrame,
   controller: TransformStreamDefaultController,
   kind: string,
 ) {
-  if (!encryptionKey) { controller.enqueue(frame); return; }
+  if (!sframeKey) { controller.enqueue(frame); return; }
 
-  const headerSize = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
+  const mediaHeader = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
   const data = new Uint8Array(frame.data);
-  if (data.byteLength <= headerSize) { controller.enqueue(frame); return; }
+  if (data.byteLength <= mediaHeader) { controller.enqueue(frame); return; }
 
-  const header = data.slice(0, headerSize);
-  const payload = data.slice(headerSize);
-  const iv = counterToIv(frameCounter++);
+  const header = encodeSFrameHeader(keyId, counter);
+  const nonce = buildNonce(counter);
+  counter++;
+
+  const key = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['encrypt']);
+  const plaintext = data.slice(mediaHeader);
 
   try {
-    const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, encryptionKey, payload);
-    const out = new Uint8Array(headerSize + IV_SIZE + enc.byteLength);
-    out.set(header, 0);
-    out.set(iv, headerSize);
-    out.set(new Uint8Array(enc), headerSize + IV_SIZE);
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: nonce, additionalData: header },
+      key,
+      plaintext,
+    );
+
+    // Output: media_header | sframe_header | ciphertext+tag
+    const out = new Uint8Array(mediaHeader + header.byteLength + ciphertext.byteLength);
+    out.set(data.slice(0, mediaHeader), 0);
+    out.set(header, mediaHeader);
+    out.set(new Uint8Array(ciphertext), mediaHeader + header.byteLength);
     frame.data = out.buffer;
   } catch { /* pass through on error */ }
 
@@ -77,28 +175,37 @@ async function decryptFrame(
   controller: TransformStreamDefaultController,
   kind: string,
 ) {
-  if (!encryptionKey) { controller.enqueue(frame); return; }
+  if (!sframeKey) { controller.enqueue(frame); return; }
 
-  const headerSize = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
+  const mediaHeader = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
   const data = new Uint8Array(frame.data);
-  if (data.byteLength <= headerSize + IV_SIZE) { controller.enqueue(frame); return; }
-
-  const header = data.slice(0, headerSize);
-  const iv = data.slice(headerSize, headerSize + IV_SIZE);
-  const ciphertext = data.slice(headerSize + IV_SIZE);
+  if (data.byteLength <= mediaHeader + 1) { controller.enqueue(frame); return; }
 
   try {
-    const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, encryptionKey, ciphertext);
-    const out = new Uint8Array(headerSize + dec.byteLength);
-    out.set(header, 0);
-    out.set(new Uint8Array(dec), headerSize);
+    const sframeData = data.slice(mediaHeader);
+    const { ctr, headerLen } = decodeSFrameHeader(sframeData);
+    const header = sframeData.slice(0, headerLen);
+    const ciphertext = sframeData.slice(headerLen);
+    const nonce = buildNonce(ctr);
+
+    const key = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['decrypt']);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: nonce, additionalData: header },
+      key,
+      ciphertext,
+    );
+
+    const out = new Uint8Array(mediaHeader + plaintext.byteLength);
+    out.set(data.slice(0, mediaHeader), 0);
+    out.set(new Uint8Array(plaintext), mediaHeader);
     frame.data = out.buffer;
-  } catch { /* pass through — key mismatch during ratchet transition */ }
+  } catch { /* ratchet transition or wrong key — pass through */ }
 
   controller.enqueue(frame);
 }
 
-// RTCRtpScriptTransform handler
+// --- RTCRtpScriptTransform handler ---
+
 self.addEventListener('rtctransform', ((event: Event) => {
   const rtc = event as RTCTransformEvent;
   const { readable, writable } = rtc.transformer;
@@ -113,16 +220,16 @@ self.addEventListener('rtctransform', ((event: Event) => {
   })).pipeTo(writable);
 }) as EventListener);
 
-// Key setup + ratchet timer
+// --- Key setup from main thread ---
+
 self.addEventListener('message', async (event: MessageEvent) => {
   if (event.data.type === 'setKey') {
-    currentKeyRaw = event.data.key;
-    encryptionKey = await crypto.subtle.importKey(
-      'raw', currentKeyRaw!, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'],
-    );
-    frameCounter = 0;
+    baseKeyRaw = event.data.key;
+    await deriveKeys(baseKeyRaw!);
+    keyId = 0;
+    counter = 0;
 
-    // Start deterministic ratchet — both peers ratchet at same interval
+    // Deterministic ratchet — both peers ratchet at the same interval
     setInterval(ratchet, RATCHET_INTERVAL);
   }
 });

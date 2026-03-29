@@ -81,22 +81,6 @@ export async function decryptSignaling(key: CryptoKey, encoded: string): Promise
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
-// --- Key ratcheting (forward secrecy) ---
-
-export async function ratchetKey(currentKeyRaw: ArrayBuffer): Promise<ArrayBuffer> {
-  const ikm = await crypto.subtle.importKey('raw', currentKeyRaw, 'HKDF', false, ['deriveBits']);
-  return crypto.subtle.deriveBits(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: new TextEncoder().encode('telvy-ratchet'),
-      info: new TextEncoder().encode('next-key'),
-    },
-    ikm,
-    256,
-  );
-}
-
 // --- Safety numbers ---
 
 function extractFingerprint(sdp: string): string | null {
