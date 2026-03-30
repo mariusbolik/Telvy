@@ -117,12 +117,13 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
   let stopOrb: (() => void) | null = null;
   let remoteStream: MediaStream | null = null;
   let videoEnabled = false;
+  let pendingCandidates: RTCIceCandidateInit[] = [];
 
   // 1. Get audio
   setState('requesting-media');
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       video: false,
     });
   } catch {
@@ -164,6 +165,8 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
 
   // 5. WebRTC peer connection
   function createPC() {
+    pendingCandidates = [];
+
     pc = new RTCPeerConnection({
       iceServers,
       iceTransportPolicy: 'relay',
@@ -176,22 +179,31 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
     };
 
     pc.ontrack = (e) => {
-      const remote = e.streams[0];
-      if (!remote) return;
-
-      remoteStream = remote;
+      // Some browsers don't associate tracks with streams — build our own
+      if (e.streams[0]) {
+        remoteStream = e.streams[0];
+      } else {
+        if (!remoteStream) remoteStream = new MediaStream();
+        if (!remoteStream.getTracks().includes(e.track)) remoteStream.addTrack(e.track);
+      }
 
       const audio = document.getElementById('remote-audio') as HTMLAudioElement;
-      if (audio) audio.srcObject = remote;
+      if (audio) {
+        audio.srcObject = remoteStream;
+        audio.play().catch(() => {});
+      }
 
       // Start orb reactivity if connection is already confirmed (race-free)
       if (!stopOrb && pc?.connectionState === 'connected') {
-        stopOrb = startOrbReactivity(remote);
+        stopOrb = startOrbReactivity(remoteStream);
       }
 
       if (e.track.kind === 'video') {
         const vid = document.getElementById('remote-video') as HTMLVideoElement;
-        if (vid) vid.srcObject = remote;
+        if (vid) {
+          vid.srcObject = remoteStream;
+          vid.play().catch(() => {});
+        }
         document.getElementById('video-section')?.classList.remove('hidden');
 
         // Apply E2EE to new video receiver (for renegotiation after initial connection)
@@ -286,13 +298,25 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
       if (msg.type === 'offer') {
         if (!pc) createPC();
         await pc!.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: msg.sdp }));
+        for (const c of pendingCandidates) {
+          await pc!.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+        }
+        pendingCandidates = [];
         const answer = await pc!.createAnswer();
         await pc!.setLocalDescription(answer);
         send({ type: 'answer', sdp: answer.sdp });
       } else if (msg.type === 'answer') {
-        await pc?.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
+        await pc!.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
+        for (const c of pendingCandidates) {
+          await pc!.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+        }
+        pendingCandidates = [];
       } else if (msg.type === 'candidate') {
-        await pc?.addIceCandidate(new RTCIceCandidate(msg.candidate));
+        if (pc?.remoteDescription) {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(() => {});
+        } else {
+          pendingCandidates.push(msg.candidate);
+        }
       }
     } catch {
       // Decryption failed — wrong PIN or corrupted message
@@ -310,6 +334,7 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
   function cleanup() {
     pc?.close();
     pc = null;
+    pendingCandidates = [];
     stopOrb?.();
     stopOrb = null;
 
@@ -354,7 +379,10 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
         }
 
         const lv = document.getElementById('local-video') as HTMLVideoElement;
-        if (lv) lv.srcObject = new MediaStream([vt]);
+        if (lv) {
+          lv.srcObject = new MediaStream([vt]);
+          lv.play().catch(() => {});
+        }
         document.getElementById('video-section')?.classList.remove('hidden');
         videoEnabled = true;
         document.getElementById('toggle-video')?.classList.remove('control-off');

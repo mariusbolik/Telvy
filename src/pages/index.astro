@@ -81,10 +81,10 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
 
       <!-- Hidden audio element for remote audio playback -->
-      <audio id="remote-audio" autoplay></audio>
+      <audio id="remote-audio" autoplay playsinline></audio>
 
       <!-- Video (hidden by default, shown when video toggled) -->
-      <div id="video-section" class="hidden mt-8 w-full max-w-2xl animate-scale-in">
+      <div id="video-section" class="relative hidden mt-8 w-full max-w-2xl animate-scale-in">
         <div class="relative aspect-video bg-gray-100 rounded-2xl overflow-hidden border border-gray-200">
           <video id="remote-video" autoplay playsinline class="w-full h-full object-cover"></video>
         </div>
