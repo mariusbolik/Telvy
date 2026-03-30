@@ -149,6 +149,9 @@ fi)
 use-auth-secret
 static-auth-secret=$TURN_SECRET
 
+min-port=49152
+max-port=65535
+
 no-multicast-peers
 no-cli
 stale-nonce=300
@@ -326,9 +329,11 @@ ufw default deny incoming > /dev/null 2>&1
 ufw default allow outgoing > /dev/null 2>&1
 ufw allow 22/tcp > /dev/null 2>&1    # SSH
 ufw allow 443/tcp > /dev/null 2>&1   # HTTPS
-ufw allow 3478/tcp > /dev/null 2>&1  # TURN TCP
-ufw allow 3478/udp > /dev/null 2>&1  # TURN UDP
-ufw allow 5349/tcp > /dev/null 2>&1  # TURNS
+ufw allow 3478/tcp > /dev/null 2>&1       # TURN TCP
+ufw allow 3478/udp > /dev/null 2>&1       # TURN UDP
+ufw allow 5349/tcp > /dev/null 2>&1       # TURNS TLS
+ufw allow 5349/udp > /dev/null 2>&1       # TURNS DTLS
+ufw allow 49152:65535/udp > /dev/null 2>&1 # TURN relay ports
 if ! $SKIP_TLS; then
   ufw allow 80/tcp > /dev/null 2>&1  # HTTP redirect + certbot renewal
 fi
@@ -338,7 +343,9 @@ echo "  Done."
 # --- Start services ---
 
 echo "[10/10] Starting services..."
-systemctl enable --now coturn
+systemctl daemon-reload
+systemctl enable coturn
+systemctl restart coturn
 systemctl enable --now telvy-signaling
 systemctl reload nginx
 echo "  Done."

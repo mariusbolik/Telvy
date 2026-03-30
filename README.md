@@ -130,16 +130,25 @@ nginx (443) ──┬── /ws       → signaling server (9000, WebSocket)
 coturn (3478, 5349) ── STUN/TURN relay
 ```
 
+**Automated setup (recommended):**
+
 ```bash
-# Build
 bun run build
-
-# Start signaling server
-TURN_SECRET=<64-char-random> TURN_DOMAIN=telvy.ch bun run start
-
-# Start coturn (set static-auth-secret to match TURN_SECRET)
-turnserver -c server/coturn.conf
+sudo bash deploy/setup.sh --domain your.domain.com --email admin@your.domain.com
 ```
+
+The script installs and configures all services (nginx, coturn, signaling server, TLS, firewall).
+
+**Required firewall ports:**
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| 443 | TCP | HTTPS / WSS |
+| 3478 | TCP + UDP | STUN/TURN |
+| 5349 | TCP + UDP | TURNS (TLS) |
+| 49152–65535 | UDP | TURN relay (media) |
+
+> The relay port range (49152–65535 UDP) is critical — without it, coturn allocates relay candidates but media packets cannot flow.
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the full hardening checklist.
 

@@ -194,13 +194,14 @@ nginx (443, TLS) ──┬── /ws       → signaling server (9000, WebSocket
                    ├── /api/*    → signaling server (9000)
                    └── /*        → static files (dist/)
 
-coturn (3478 UDP/TCP, 5349 TLS) ── STUN/TURN relay
+coturn (3478 UDP/TCP, 5349 TLS, 49152-65535 UDP relay) ── STUN/TURN relay
 ```
 
 ### Setup
 
-1. Build: `bun run build`
-2. Copy `dist/` to VPS, serve with nginx
-3. Run signaling server: `TURN_SECRET=<secret> TURN_DOMAIN=telvy.ch bun run start`
-4. Run coturn: `turnserver -c /path/to/coturn.conf` (set `static-auth-secret` to match `TURN_SECRET`)
-5. Configure nginx reverse proxy + TLS (Let's Encrypt)
+```bash
+bun run build
+sudo bash deploy/setup.sh --domain your.domain.com --email admin@your.domain.com
+```
+
+The script configures all services. Required open ports: 443/tcp, 3478/tcp+udp, 5349/tcp+udp, **49152–65535/udp** (TURN relay — without this, coturn allocates relay addresses but media packets cannot pass through).

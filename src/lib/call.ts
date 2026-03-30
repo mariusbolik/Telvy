@@ -108,6 +108,7 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
   let ws: WebSocket | null = null;
   let localStream: MediaStream | null = null;
   let stopOrb: (() => void) | null = null;
+  let remoteStream: MediaStream | null = null;
   let videoEnabled = false;
 
   // 1. Get audio
@@ -168,13 +169,15 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
       const remote = e.streams[0];
       if (!remote) return;
 
+      remoteStream = remote;
+
       const audio = document.getElementById('remote-audio') as HTMLAudioElement;
       if (audio) audio.srcObject = remote;
 
-      setState('connected');
-      document.getElementById('share-section')?.classList.add('hidden');
-
-      if (!stopOrb) stopOrb = startOrbReactivity(remote);
+      // Start orb reactivity if connection is already confirmed (race-free)
+      if (!stopOrb && pc?.connectionState === 'connected') {
+        stopOrb = startOrbReactivity(remote);
+      }
 
       if (e.track.kind === 'video') {
         const vid = document.getElementById('remote-video') as HTMLVideoElement;
@@ -185,6 +188,11 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
 
     pc.onconnectionstatechange = () => {
       if (pc?.connectionState === 'connected') {
+        setState('connected');
+        document.getElementById('share-section')?.classList.add('hidden');
+
+        if (!stopOrb && remoteStream) stopOrb = startOrbReactivity(remoteStream);
+
         // Safety numbers
         const local = pc.localDescription?.sdp || '';
         const remote = pc.remoteDescription?.sdp || '';
