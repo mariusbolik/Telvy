@@ -123,7 +123,14 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
   setState('requesting-media');
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,        // mono — halves processing load, better for voice
+        sampleRate: 48000,      // Opus native rate
+        sampleSize: 16,
+      },
       video: false,
     });
   } catch {

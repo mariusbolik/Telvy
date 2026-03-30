@@ -25,6 +25,13 @@ let baseKeyRaw: ArrayBuffer | null = null;
 let keyId = 0;
 let counter = 0;
 
+// Cached CryptoKey objects — imported once per key derivation, not per frame
+let encryptKey: CryptoKey | null = null;
+let decryptKey: CryptoKey | null = null;
+// Previous-generation keys kept during ratchet transition to decrypt in-flight frames
+let prevDecryptKey: CryptoKey | null = null;
+let prevSframeSalt: ArrayBuffer | null = null;
+
 const VIDEO_HEADER = 10;
 const AUDIO_HEADER = 1;
 
@@ -50,14 +57,22 @@ async function hkdfExpand(prk: ArrayBuffer, info: string, length: number): Promi
 async function deriveKeys(baseKey: ArrayBuffer) {
   const salt = new TextEncoder().encode('SFrame10');
   const secret = await hkdfExtract(salt, baseKey);
-  sframeKey = await hkdfExpand(secret, 'key', 32); // AES-256
-  sframeSalt = await hkdfExpand(secret, 'salt', 12); // GCM nonce
+  sframeKey = await hkdfExpand(secret, 'key', 32);  // AES-256
+  sframeSalt = await hkdfExpand(secret, 'salt', 12); // GCM nonce base
+
+  // Cache CryptoKey objects — avoid re-importing on every frame
+  encryptKey = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['encrypt']);
+  decryptKey = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['decrypt']);
 }
 
 // --- SFrame key ratcheting (RFC 9605 Section 4.4.2) ---
 
 async function ratchet() {
   if (!baseKeyRaw) return;
+
+  // Preserve previous keys so in-flight frames can still be decrypted
+  prevDecryptKey = decryptKey;
+  prevSframeSalt = sframeSalt;
 
   const salt = new TextEncoder().encode('SFrame10');
   const secret = await hkdfExtract(salt, baseKeyRaw);
@@ -71,7 +86,6 @@ async function ratchet() {
 // --- SFrame header encoding (RFC 9605 Section 4.3) ---
 
 function encodeSFrameHeader(kid: number, ctr: number): Uint8Array {
-  // Config byte: X|KKK|Y|CCC
   const kidBytes = kid < 8 ? 0 : Math.ceil(Math.log2(Math.max(kid, 1) + 1) / 8);
   const ctrBytes = ctr < 8 ? 0 : Math.ceil(Math.log2(Math.max(ctr, 1) + 1) / 8);
 
@@ -86,14 +100,10 @@ function encodeSFrameHeader(kid: number, ctr: number): Uint8Array {
 
   let offset = 1;
   if (x) {
-    for (let i = kidBytes - 1; i >= 0; i--) {
-      header[offset++] = (kid >> (i * 8)) & 0xff;
-    }
+    for (let i = kidBytes - 1; i >= 0; i--) header[offset++] = (kid >> (i * 8)) & 0xff;
   }
   if (y) {
-    for (let i = ctrBytes - 1; i >= 0; i--) {
-      header[offset++] = (ctr >> (i * 8)) & 0xff;
-    }
+    for (let i = ctrBytes - 1; i >= 0; i--) header[offset++] = (ctr >> (i * 8)) & 0xff;
   }
 
   return header;
@@ -107,14 +117,13 @@ function decodeSFrameHeader(data: Uint8Array): { kid: number; ctr: number; heade
   const c = config & 0x7;
 
   let offset = 1;
-  let kid: number;
-  let ctr: number;
+  let kid = 0;
+  let ctr = 0;
 
   if (x === 0) {
     kid = k;
   } else {
     const len = k + 1;
-    kid = 0;
     for (let i = 0; i < len; i++) kid = (kid << 8) | data[offset++];
   }
 
@@ -122,7 +131,6 @@ function decodeSFrameHeader(data: Uint8Array): { kid: number; ctr: number; heade
     ctr = c;
   } else {
     const len = c + 1;
-    ctr = 0;
     for (let i = 0; i < len; i++) ctr = (ctr << 8) | data[offset++];
   }
 
@@ -131,18 +139,12 @@ function decodeSFrameHeader(data: Uint8Array): { kid: number; ctr: number; heade
 
 // --- Nonce construction (RFC 9605 Section 4.4.3) ---
 
-function buildNonce(ctr: number): Uint8Array {
-  if (!sframeSalt) throw new Error('No salt');
-  const salt = new Uint8Array(sframeSalt);
-  const nonce = new Uint8Array(12);
-  nonce.set(salt);
-
-  // XOR counter into nonce (big-endian, right-aligned)
+function buildNonce(ctr: number, salt: ArrayBuffer): Uint8Array {
+  const nonce = new Uint8Array(new Uint8Array(salt));
   const ctrBuf = new Uint8Array(12);
   const view = new DataView(ctrBuf.buffer);
   view.setUint32(4, Math.floor(ctr / 0x100000000), false);
   view.setUint32(8, ctr >>> 0, false);
-
   for (let i = 0; i < 12; i++) nonce[i] ^= ctrBuf[i];
   return nonce;
 }
@@ -154,27 +156,23 @@ async function encryptFrame(
   controller: TransformStreamDefaultController<RTCEncodedVideoFrame | RTCEncodedAudioFrame>,
   kind: 'audio' | 'video',
 ) {
-  if (!sframeKey) { controller.enqueue(frame); return; }
+  if (!encryptKey || !sframeSalt) { controller.enqueue(frame); return; }
 
   const mediaHeader = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
   const data = new Uint8Array(frame.data);
   if (data.byteLength <= mediaHeader) { controller.enqueue(frame); return; }
 
   const header = encodeSFrameHeader(keyId, counter);
-  const nonce = buildNonce(counter);
+  const nonce = buildNonce(counter, sframeSalt);
   counter++;
-
-  const key = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['encrypt']);
-  const plaintext = data.slice(mediaHeader);
 
   try {
     const ciphertext = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv: nonce, additionalData: header },
-      key,
-      plaintext,
+      encryptKey,
+      data.slice(mediaHeader),
     );
 
-    // Output: media_header | sframe_header | ciphertext+tag
     const out = new Uint8Array(mediaHeader + header.byteLength + ciphertext.byteLength);
     out.set(data.slice(0, mediaHeader), 0);
     out.set(header, mediaHeader);
@@ -190,32 +188,43 @@ async function decryptFrame(
   controller: TransformStreamDefaultController<RTCEncodedVideoFrame | RTCEncodedAudioFrame>,
   kind: 'audio' | 'video',
 ) {
-  if (!sframeKey) { controller.enqueue(frame); return; }
+  if (!decryptKey || !sframeSalt) { controller.enqueue(frame); return; }
 
   const mediaHeader = kind === 'video' ? VIDEO_HEADER : AUDIO_HEADER;
   const data = new Uint8Array(frame.data);
   if (data.byteLength <= mediaHeader + 1) { controller.enqueue(frame); return; }
 
-  try {
-    const sframeData = data.slice(mediaHeader);
-    const { ctr, headerLen } = decodeSFrameHeader(sframeData);
-    const header = sframeData.slice(0, headerLen);
-    const ciphertext = sframeData.slice(headerLen);
-    const nonce = buildNonce(ctr);
+  const sframeData = data.slice(mediaHeader);
+  const { ctr, headerLen } = decodeSFrameHeader(sframeData);
+  const header = sframeData.slice(0, headerLen);
+  const ciphertext = sframeData.slice(headerLen);
 
-    const key = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['decrypt']);
-    const plaintext = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: nonce, additionalData: header },
-      key,
-      ciphertext,
-    );
+  // Try current key first, then previous key (handles ratchet transition window)
+  const keysToTry: Array<{ key: CryptoKey; salt: ArrayBuffer }> = [
+    { key: decryptKey, salt: sframeSalt },
+  ];
+  if (prevDecryptKey && prevSframeSalt) {
+    keysToTry.push({ key: prevDecryptKey, salt: prevSframeSalt });
+  }
 
-    const out = new Uint8Array(mediaHeader + plaintext.byteLength);
-    out.set(data.slice(0, mediaHeader), 0);
-    out.set(new Uint8Array(plaintext), mediaHeader);
-    frame.data = out.buffer;
-  } catch { /* ratchet transition or wrong key — pass through */ }
+  for (const { key, salt } of keysToTry) {
+    try {
+      const nonce = buildNonce(ctr, salt);
+      const plaintext = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: nonce, additionalData: header },
+        key,
+        ciphertext,
+      );
+      const out = new Uint8Array(mediaHeader + plaintext.byteLength);
+      out.set(data.slice(0, mediaHeader), 0);
+      out.set(new Uint8Array(plaintext), mediaHeader);
+      frame.data = out.buffer;
+      controller.enqueue(frame);
+      return;
+    } catch { /* try next key */ }
+  }
 
+  // All keys failed — pass through (wrong key, corrupted, or unencrypted)
   controller.enqueue(frame);
 }
 
@@ -242,7 +251,14 @@ self.addEventListener('message', async (event: MessageEvent<{ type: string; key:
     keyId = 0;
     counter = 0;
 
-    // Deterministic ratchet — both peers ratchet at the same interval
-    setInterval(ratchet, RATCHET_INTERVAL);
+    // Align ratchet to wall-clock 60s boundaries so both peers ratchet simultaneously.
+    // Without alignment each peer ratchets from when it received the key, causing
+    // a desync window where one side encrypts with a new key the other can't yet decrypt.
+    const now = Date.now();
+    const msUntilBoundary = RATCHET_INTERVAL - (now % RATCHET_INTERVAL);
+    setTimeout(() => {
+      ratchet();
+      setInterval(ratchet, RATCHET_INTERVAL);
+    }, msUntilBoundary);
   }
 });
