@@ -4,8 +4,18 @@ import {
   encryptSignaling,
   decryptSignaling,
   computeVerificationCode,
-  arrayBufferToBase64,
 } from './crypto';
+
+type SignalingMessage =
+  | { type: 'offer'; sdp: string }
+  | { type: 'answer'; sdp: string }
+  | { type: 'candidate'; candidate: RTCIceCandidateInit };
+
+function isSignalingMessage(msg: unknown): msg is SignalingMessage {
+  if (typeof msg !== 'object' || msg === null) return false;
+  const { type } = msg as { type?: unknown };
+  return type === 'offer' || type === 'answer' || type === 'candidate';
+}
 
 const supportsE2EE =
   typeof window !== 'undefined' && 'RTCRtpScriptTransform' in window;
@@ -86,14 +96,11 @@ function startOrbReactivity(stream: MediaStream) {
 function applyE2ee(pc: RTCPeerConnection, keyRaw: ArrayBuffer) {
   if (!supportsE2EE) return;
 
-  const apply = (transceiver: RTCRtpSender | RTCRtpReceiver, direction: string) => {
+  const apply = (transceiver: RTCRtpSender | RTCRtpReceiver, direction: 'encrypt' | 'decrypt') => {
     if (!transceiver.track) return;
     const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
     w.postMessage({ type: 'setKey', key: keyRaw });
-    (transceiver as any).transform = new (window as any).RTCRtpScriptTransform(w, {
-      direction,
-      kind: transceiver.track.kind,
-    });
+    transceiver.transform = new RTCRtpScriptTransform(w, { direction, kind: transceiver.track.kind });
   };
 
   pc.getSenders().forEach((s) => apply(s, 'encrypt'));
@@ -130,7 +137,10 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
   let iceServers: RTCIceServer[] = [];
   try {
     const res = await fetch('/api/turn-credentials');
-    if (res.ok) iceServers = (await res.json()).iceServers;
+    if (res.ok) {
+      const data = await res.json() as { iceServers: RTCIceServer[] };
+      iceServers = data.iceServers;
+    }
   } catch { /* */ }
 
   if (!iceServers.length) {
@@ -156,7 +166,7 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
   function createPC() {
     pc = new RTCPeerConnection({
       iceServers,
-      iceTransportPolicy: 'relay' as RTCIceTransportPolicy,
+      iceTransportPolicy: 'relay',
     });
 
     localStream!.getTracks().forEach((t) => pc!.addTrack(t, localStream!));
@@ -190,7 +200,7 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
           if (receiver?.track) {
             const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
             w.postMessage({ type: 'setKey', key: callKeyRaw });
-            (receiver as any).transform = new (window as any).RTCRtpScriptTransform(w, { direction: 'decrypt', kind: 'video' });
+            receiver.transform = new RTCRtpScriptTransform(w, { direction: 'decrypt', kind: 'video' });
           }
         }
       }
@@ -248,26 +258,30 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
 
     // Control messages from server (unencrypted JSON)
     try {
-      const ctrl = JSON.parse(raw);
-      if (ctrl.type === 'peer-joined') {
-        // We were here first — create offer
-        createPC();
-        const offer = await pc!.createOffer();
-        await pc!.setLocalDescription(offer);
-        send({ type: 'offer', sdp: offer.sdp });
-        return;
-      }
-      if (ctrl.type === 'peer-left') {
-        cleanup();
-        setState('waiting');
-        document.getElementById('share-section')?.classList.remove('hidden');
-        return;
+      const ctrl: unknown = JSON.parse(raw);
+      if (typeof ctrl === 'object' && ctrl !== null && 'type' in ctrl) {
+        const { type } = ctrl as { type: unknown };
+        if (type === 'peer-joined') {
+          // We were here first — create offer
+          createPC();
+          const offer = await pc!.createOffer();
+          await pc!.setLocalDescription(offer);
+          send({ type: 'offer', sdp: offer.sdp });
+          return;
+        }
+        if (type === 'peer-left') {
+          cleanup();
+          setState('waiting');
+          document.getElementById('share-section')?.classList.remove('hidden');
+          return;
+        }
       }
     } catch { /* not JSON — must be encrypted */ }
 
     // Encrypted signaling from peer
     try {
-      const msg = await decryptSignaling(sigKey, raw) as any;
+      const msg = await decryptSignaling(sigKey, raw);
+      if (!isSignalingMessage(msg)) return;
 
       if (msg.type === 'offer') {
         if (!pc) createPC();
@@ -335,7 +349,7 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
           if (sender?.track) {
             const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
             w.postMessage({ type: 'setKey', key: callKeyRaw });
-            (sender as any).transform = new (window as any).RTCRtpScriptTransform(w, { direction: 'encrypt', kind: 'video' });
+            sender.transform = new RTCRtpScriptTransform(w, { direction: 'encrypt', kind: 'video' });
           }
         }
 

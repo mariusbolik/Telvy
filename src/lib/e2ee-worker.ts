@@ -2,6 +2,21 @@
 // Cipher suite: AES_256_GCM_SHA512_128 (AES-256-GCM, SHA-256, 128-bit tag)
 // Key ratcheting every 60s via HKDF for forward secrecy
 
+// RTCTransformEvent is defined in lib.webworker.d.ts but not lib.dom.d.ts.
+// Declare the minimal interface needed for this worker.
+interface E2eeTransformOptions {
+  direction: 'encrypt' | 'decrypt';
+  kind: 'audio' | 'video';
+}
+
+interface RTCTransformEvent extends Event {
+  readonly transformer: {
+    readonly options: E2eeTransformOptions;
+    readonly readable: ReadableStream<RTCEncodedVideoFrame | RTCEncodedAudioFrame>;
+    readonly writable: WritableStream<RTCEncodedVideoFrame | RTCEncodedAudioFrame>;
+  };
+}
+
 const RATCHET_INTERVAL = 60_000;
 
 let sframeKey: ArrayBuffer | null = null;
@@ -15,7 +30,7 @@ const AUDIO_HEADER = 1;
 
 // --- HKDF (RFC 5869) via Web Crypto ---
 
-async function hkdfExtract(salt: ArrayBuffer, ikm: ArrayBuffer): Promise<ArrayBuffer> {
+async function hkdfExtract(salt: BufferSource, ikm: BufferSource): Promise<ArrayBuffer> {
   const key = await crypto.subtle.importKey('raw', salt, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return crypto.subtle.sign('HMAC', key, ikm);
 }
@@ -136,8 +151,8 @@ function buildNonce(ctr: number): Uint8Array {
 
 async function encryptFrame(
   frame: RTCEncodedVideoFrame | RTCEncodedAudioFrame,
-  controller: TransformStreamDefaultController,
-  kind: string,
+  controller: TransformStreamDefaultController<RTCEncodedVideoFrame | RTCEncodedAudioFrame>,
+  kind: 'audio' | 'video',
 ) {
   if (!sframeKey) { controller.enqueue(frame); return; }
 
@@ -172,8 +187,8 @@ async function encryptFrame(
 
 async function decryptFrame(
   frame: RTCEncodedVideoFrame | RTCEncodedAudioFrame,
-  controller: TransformStreamDefaultController,
-  kind: string,
+  controller: TransformStreamDefaultController<RTCEncodedVideoFrame | RTCEncodedAudioFrame>,
+  kind: 'audio' | 'video',
 ) {
   if (!sframeKey) { controller.enqueue(frame); return; }
 
@@ -209,12 +224,10 @@ async function decryptFrame(
 self.addEventListener('rtctransform', ((event: Event) => {
   const rtc = event as RTCTransformEvent;
   const { readable, writable } = rtc.transformer;
-  const opts = rtc.transformer.options as { direction: string; kind: string };
-  const dir = opts?.direction || 'encrypt';
-  const kind = opts?.kind || 'video';
+  const { direction, kind } = rtc.transformer.options;
 
-  readable.pipeThrough(new TransformStream({
-    transform: (frame, ctrl) => dir === 'encrypt'
+  readable.pipeThrough(new TransformStream<RTCEncodedVideoFrame | RTCEncodedAudioFrame, RTCEncodedVideoFrame | RTCEncodedAudioFrame>({
+    transform: (frame, ctrl) => direction === 'encrypt'
       ? encryptFrame(frame, ctrl, kind)
       : decryptFrame(frame, ctrl, kind),
   })).pipeTo(writable);
@@ -222,10 +235,10 @@ self.addEventListener('rtctransform', ((event: Event) => {
 
 // --- Key setup from main thread ---
 
-self.addEventListener('message', async (event: MessageEvent) => {
+self.addEventListener('message', async (event: MessageEvent<{ type: string; key: ArrayBuffer }>) => {
   if (event.data.type === 'setKey') {
     baseKeyRaw = event.data.key;
-    await deriveKeys(baseKeyRaw!);
+    await deriveKeys(baseKeyRaw);
     keyId = 0;
     counter = 0;
 

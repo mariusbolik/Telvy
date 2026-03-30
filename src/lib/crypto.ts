@@ -72,7 +72,7 @@ export async function encryptSignaling(key: CryptoKey, data: object): Promise<st
   return arrayBufferToBase64(combined.buffer);
 }
 
-export async function decryptSignaling(key: CryptoKey, encoded: string): Promise<object> {
+export async function decryptSignaling(key: CryptoKey, encoded: string): Promise<unknown> {
   const combined = new Uint8Array(base64ToArrayBuffer(encoded));
   const iv = combined.slice(0, 12);
   const ciphertext = combined.slice(12);
