@@ -183,6 +183,16 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
         const vid = document.getElementById('remote-video') as HTMLVideoElement;
         if (vid) vid.srcObject = remote;
         document.getElementById('video-section')?.classList.remove('hidden');
+
+        // Apply E2EE to new video receiver (for renegotiation after initial connection)
+        if (supportsE2EE && pc?.connectionState === 'connected') {
+          const receiver = pc.getReceivers().find((r) => r.track === e.track);
+          if (receiver?.track) {
+            const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
+            w.postMessage({ type: 'setKey', key: callKeyRaw });
+            (receiver as any).transform = new (window as any).RTCRtpScriptTransform(w, { direction: 'decrypt', kind: 'video' });
+          }
+        }
       }
     };
 
@@ -206,6 +216,17 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
         cleanup();
         setState('disconnected');
       }
+    };
+
+    pc.onnegotiationneeded = async () => {
+      if (pc?.connectionState !== 'connected') return;
+      if (pc?.signalingState !== 'stable') return;
+      try {
+        const offer = await pc!.createOffer();
+        if (pc?.signalingState !== 'stable') return;
+        await pc!.setLocalDescription(offer);
+        send({ type: 'offer', sdp: offer.sdp });
+      } catch { /* ignore */ }
     };
 
     return pc;
@@ -249,7 +270,7 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
       const msg = await decryptSignaling(sigKey, raw) as any;
 
       if (msg.type === 'offer') {
-        createPC();
+        if (!pc) createPC();
         await pc!.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: msg.sdp }));
         const answer = await pc!.createAnswer();
         await pc!.setLocalDescription(answer);
@@ -307,6 +328,17 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
         const vt = vs.getVideoTracks()[0];
         localStream?.addTrack(vt);
         pc?.addTrack(vt, localStream!);
+
+        // Apply E2EE to new video sender
+        if (supportsE2EE && pc) {
+          const sender = pc.getSenders().find((s) => s.track === vt);
+          if (sender?.track) {
+            const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
+            w.postMessage({ type: 'setKey', key: callKeyRaw });
+            (sender as any).transform = new (window as any).RTCRtpScriptTransform(w, { direction: 'encrypt', kind: 'video' });
+          }
+        }
+
         const lv = document.getElementById('local-video') as HTMLVideoElement;
         if (lv) lv.srcObject = new MediaStream([vt]);
         document.getElementById('video-section')?.classList.remove('hidden');
