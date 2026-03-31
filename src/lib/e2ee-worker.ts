@@ -1,6 +1,6 @@
 // SFrame (RFC 9605) E2EE Web Worker
 // Cipher suite: AES_256_GCM_SHA512_128 (AES-256-GCM, SHA-256, 128-bit tag)
-// Key ratcheting every 60s via HKDF for forward secrecy
+// Single per-call SFrame key derived via HKDF
 
 // RTCTransformEvent is defined in lib.webworker.d.ts but not lib.dom.d.ts.
 // Declare the minimal interface needed for this worker.
