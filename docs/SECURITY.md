@@ -42,7 +42,7 @@ Telvy is designed so that no party — including the server operator — can acc
 - Base key derived from room ID + optional PIN — never exchanged over the wire
 - Nonce constructed as `sframe_salt XOR counter` (per spec Section 4.4.3)
 - Variable-length SFrame header encodes Key ID (KID) and frame counter (CTR)
-- Key ratcheted every 60s via `Expand(secret, 'ratchet')` with KID increment
+- Single key for the full call duration — derived once from room ID + PIN, never changes
 - Preserves codec headers for browser packetization (10 bytes video, 1 byte audio)
 - Graceful degradation: disabled on browsers without `RTCRtpScriptTransform` support
 
@@ -101,16 +101,9 @@ All media is forced through the TURN server via `iceTransportPolicy: 'relay'` (e
 - The TURN server sees both participants' IPs but cannot read the encrypted media
 - Direct P2P connections are never attempted
 
-## Forward Secrecy
+## Session Key
 
-The E2EE key is ratcheted every 60 seconds using an HKDF chain:
-
-1. Initial key is derived from room ID + optional PIN via HKDF-SHA256
-2. Every 60 seconds, the current key is fed back into HKDF to produce the next key
-3. The previous key is securely discarded
-4. An attacker who compromises a key can only decrypt the current 60-second window — not past segments
-
-This provides forward secrecy within a call. Even if a key is compromised mid-call, earlier conversation segments remain protected.
+The E2EE key is derived once at call start from the room ID + optional PIN via HKDF-SHA256 and remains fixed for the entire call duration. It is never transmitted over the wire — both peers independently derive the same key from the shared room URL. If the room link is compromised, call content can be decrypted; using a PIN raises the bar significantly.
 
 ## Room PINs
 

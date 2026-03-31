@@ -61,7 +61,7 @@ All infrastructure is self-hosted on a single Swiss VPS. No third-party servers 
 
 6. **Media** — Audio (and optionally video) flows between browsers. With `iceTransportPolicy: 'relay'`, all media routes through coturn. The TURN server relays encrypted packets it cannot read.
 
-7. **E2EE** — Frame-level encryption using SFrame (RFC 9605) via the Encoded Transform API. Uses AES-256-GCM with SFrame header as authenticated data. The key is derived from the room ID + optional PIN via HKDF — never exchanged over the wire. The key is ratcheted every 60 seconds per the SFrame ratchet mechanism for forward secrecy.
+7. **E2EE** — Frame-level encryption using SFrame (RFC 9605) via the Encoded Transform API. Uses AES-256-GCM with SFrame header as authenticated data. The key is derived from the room ID + optional PIN via HKDF — never exchanged over the wire. The same key is used for the full call duration.
 
 8. **Teardown** — When users hang up, all streams stop, the connection is closed, and the room ceases to exist. Nothing is persisted.
 
@@ -88,7 +88,7 @@ Telvy/
 │       │                        - Native RTCPeerConnection (no wrapper)
 │       │                        - Encrypted WebSocket signaling (AES-256-GCM)
 │       │                        - HKDF key derivation from room ID + PIN
-│       │                        - Key ratcheting every 60s (forward secrecy)
+│       │                        - ICE candidate queuing for reliable relay setup
 │       │                        - Audio analyser → orb reactivity
 │       │                        - Safety numbers from DTLS fingerprints
 │       │                        - UI controls (mic, video, hang up, copy link)
@@ -103,7 +103,7 @@ Telvy/
 │       │                        - HKDF key derivation per spec (Extract/Expand)
 │       │                        - Variable-length SFrame header (KID + CTR)
 │       │                        - Nonce = sframe_salt XOR counter
-│       │                        - Key ratcheting every 60s with KID increment
+│       │                        - CryptoKey cached per session (not per frame)
 │       │
 │       └── room-id.ts           Room ID generator (unique-names-generator)
 │
@@ -141,7 +141,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 | **DTLS-SRTP** | Media transport | Built into WebRTC (always on) |
 | **E2EE** | Audio/video content | SFrame (RFC 9605) via Encoded Transform API |
 | **Encrypted signaling** | SDP/ICE exchange | AES-256-GCM encrypted client-side (HKDF-SHA256 from room ID + PIN) |
-| **Forward secrecy** | Past call segments | E2EE key ratcheted every 60s via HKDF chain |
+| **Session key** | Media content | E2EE key fixed for call lifetime — derived from room ID + PIN, never sent over wire |
 | **Room PINs** | Room authentication | Optional PIN appended to room ID before HKDF — never sent to server |
 | **TLS** | Transport | WSS for signaling WebSocket, TURNS for coturn |
 | **TURN relay** | IP addresses | `iceTransportPolicy: 'relay'` hides participant IPs |

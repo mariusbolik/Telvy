@@ -48,7 +48,7 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 | IP privacy | Forced TURN relay, peers never learn each other's IP |
 | TURN auth | HMAC-SHA1 credentials, 1-hour TTL, rate-limited |
 | Signaling | Encrypted WebSocket (AES-256-GCM, HKDF-SHA256 derived key) |
-| Forward secrecy | E2EE key ratcheted every 60s via HKDF chain |
+| Session key | E2EE key fixed for call duration, derived from room ID + PIN |
 | Room PINs | Optional PIN for room auth (never sent to server) |
 | Verification | Safety numbers from DTLS fingerprints |
 | Persistence | Zero. No database, no logs, no cookies |
@@ -66,7 +66,7 @@ Audio by default. Video optional. One click to end.
 Under the hood:
 1. Native WebRTC with encrypted WebSocket signaling (AES-256-GCM, key derived via HKDF-SHA256 from room ID + optional PIN)
 2. Media is forced through your coturn TURN relay (peers never see each other's IP)
-3. E2EE key derived from room ID + PIN via HKDF — never exchanged over the wire. Ratcheted every 60s for forward secrecy
+3. E2EE key derived from room ID + PIN via HKDF — never exchanged over the wire, fixed for the call duration
 4. Safety numbers let both parties verify the connection isn't intercepted
 
 ## Quick Start
@@ -100,7 +100,7 @@ src/
   pages/index.astro       Single-page app (all UI states)
   lib/call.ts             WebRTC call logic, encrypted signaling, orb reactivity, controls
   lib/crypto.ts           Verification codes, base64 utils
-  lib/e2ee-worker.ts      SFrame (RFC 9605) frame encryption with key ratcheting
+  lib/e2ee-worker.ts      SFrame (RFC 9605) frame encryption
   lib/room-id.ts          Word-based room IDs
   styles/global.css       Tailwind theme, orb animations
 server/
@@ -165,4 +165,4 @@ MIT
 
 ---
 
-**Keywords:** WebRTC, peer-to-peer, P2P, encrypted calls, E2EE, end-to-end encryption, private video calls, secure audio calls, self-hosted, open source, no tracking, no logs, Swiss hosting, TURN relay, coturn, Astro, Bun, privacy-first, Signal alternative, Zoom alternative, forward secrecy, encrypted signaling, HKDF
+**Keywords:** WebRTC, peer-to-peer, P2P, encrypted calls, E2EE, end-to-end encryption, private video calls, secure audio calls, self-hosted, open source, no tracking, no logs, Swiss hosting, TURN relay, coturn, Astro, Bun, privacy-first, Signal alternative, Zoom alternative, encrypted signaling, HKDF
