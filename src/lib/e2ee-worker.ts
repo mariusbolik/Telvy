@@ -17,20 +17,13 @@ interface RTCTransformEvent extends Event {
   };
 }
 
-const RATCHET_INTERVAL = 60_000;
-
 let sframeKey: ArrayBuffer | null = null;
 let sframeSalt: ArrayBuffer | null = null;
-let baseKeyRaw: ArrayBuffer | null = null;
-let keyId = 0;
 let counter = 0;
 
-// Cached CryptoKey objects — imported once per key derivation, not per frame
+// Cached CryptoKey objects — imported once on key derivation, not per frame
 let encryptKey: CryptoKey | null = null;
 let decryptKey: CryptoKey | null = null;
-// Previous-generation keys kept during ratchet transition to decrypt in-flight frames
-let prevDecryptKey: CryptoKey | null = null;
-let prevSframeSalt: ArrayBuffer | null = null;
 
 const VIDEO_HEADER = 10;
 const AUDIO_HEADER = 1;
@@ -65,47 +58,22 @@ async function deriveKeys(baseKey: ArrayBuffer) {
   decryptKey = await crypto.subtle.importKey('raw', sframeKey, { name: 'AES-GCM' }, false, ['decrypt']);
 }
 
-// --- SFrame key ratcheting (RFC 9605 Section 4.4.2) ---
-
-async function ratchet() {
-  if (!baseKeyRaw) return;
-
-  // Preserve previous keys so in-flight frames can still be decrypted
-  prevDecryptKey = decryptKey;
-  prevSframeSalt = sframeSalt;
-
-  const salt = new TextEncoder().encode('SFrame10');
-  const secret = await hkdfExtract(salt, baseKeyRaw);
-  baseKeyRaw = await hkdfExpand(secret, 'ratchet', 32);
-
-  await deriveKeys(baseKeyRaw);
-  keyId++;
-  counter = 0;
-}
-
 // --- SFrame header encoding (RFC 9605 Section 4.3) ---
 
-function encodeSFrameHeader(kid: number, ctr: number): Uint8Array {
-  const kidBytes = kid < 8 ? 0 : Math.ceil(Math.log2(Math.max(kid, 1) + 1) / 8);
-  const ctrBytes = ctr < 8 ? 0 : Math.ceil(Math.log2(Math.max(ctr, 1) + 1) / 8);
-
-  const x = kid < 8 ? 0 : 1;
-  const k = kid < 8 ? kid : kidBytes - 1;
+function encodeSFrameHeader(ctr: number): Uint8Array {
+  // KID is always 0 (no ratcheting), fits in 3 bits (x=0, k=0)
   const y = ctr < 8 ? 0 : 1;
-  const c = ctr < 8 ? ctr : ctrBytes - 1;
+  const c = ctr < 8 ? ctr : Math.ceil(Math.log2(Math.max(ctr, 1) + 1) / 8) - 1;
+  const config = (y << 3) | c;
 
-  const config = (x << 7) | (k << 4) | (y << 3) | c;
-  const header = new Uint8Array(1 + (x ? kidBytes : 0) + (y ? ctrBytes : 0));
+  if (y === 0) {
+    return new Uint8Array([config]);
+  }
+
+  const ctrBytes = c + 1;
+  const header = new Uint8Array(1 + ctrBytes);
   header[0] = config;
-
-  let offset = 1;
-  if (x) {
-    for (let i = kidBytes - 1; i >= 0; i--) header[offset++] = (kid >> (i * 8)) & 0xff;
-  }
-  if (y) {
-    for (let i = ctrBytes - 1; i >= 0; i--) header[offset++] = (ctr >> (i * 8)) & 0xff;
-  }
-
+  for (let i = ctrBytes - 1; i >= 0; i--) header[1 + (ctrBytes - 1 - i)] = (ctr >> (i * 8)) & 0xff;
   return header;
 }
 
@@ -162,7 +130,7 @@ async function encryptFrame(
   const data = new Uint8Array(frame.data);
   if (data.byteLength <= mediaHeader) { controller.enqueue(frame); return; }
 
-  const header = encodeSFrameHeader(keyId, counter);
+  const header = encodeSFrameHeader(counter);
   const nonce = buildNonce(counter, sframeSalt);
   counter++;
 
@@ -199,32 +167,19 @@ async function decryptFrame(
   const header = sframeData.slice(0, headerLen);
   const ciphertext = sframeData.slice(headerLen);
 
-  // Try current key first, then previous key (handles ratchet transition window)
-  const keysToTry: Array<{ key: CryptoKey; salt: ArrayBuffer }> = [
-    { key: decryptKey, salt: sframeSalt },
-  ];
-  if (prevDecryptKey && prevSframeSalt) {
-    keysToTry.push({ key: prevDecryptKey, salt: prevSframeSalt });
-  }
+  try {
+    const nonce = buildNonce(ctr, sframeSalt);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: nonce, additionalData: header },
+      decryptKey,
+      ciphertext,
+    );
+    const out = new Uint8Array(mediaHeader + plaintext.byteLength);
+    out.set(data.slice(0, mediaHeader), 0);
+    out.set(new Uint8Array(plaintext), mediaHeader);
+    frame.data = out.buffer;
+  } catch { /* wrong key or corrupted — pass through */ }
 
-  for (const { key, salt } of keysToTry) {
-    try {
-      const nonce = buildNonce(ctr, salt);
-      const plaintext = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: nonce, additionalData: header },
-        key,
-        ciphertext,
-      );
-      const out = new Uint8Array(mediaHeader + plaintext.byteLength);
-      out.set(data.slice(0, mediaHeader), 0);
-      out.set(new Uint8Array(plaintext), mediaHeader);
-      frame.data = out.buffer;
-      controller.enqueue(frame);
-      return;
-    } catch { /* try next key */ }
-  }
-
-  // All keys failed — pass through (wrong key, corrupted, or unencrypted)
   controller.enqueue(frame);
 }
 
@@ -246,19 +201,7 @@ self.addEventListener('rtctransform', ((event: Event) => {
 
 self.addEventListener('message', async (event: MessageEvent<{ type: string; key: ArrayBuffer }>) => {
   if (event.data.type === 'setKey') {
-    baseKeyRaw = event.data.key;
-    await deriveKeys(baseKeyRaw);
-    keyId = 0;
+    await deriveKeys(event.data.key);
     counter = 0;
-
-    // Align ratchet to wall-clock 60s boundaries so both peers ratchet simultaneously.
-    // Without alignment each peer ratchets from when it received the key, causing
-    // a desync window where one side encrypts with a new key the other can't yet decrypt.
-    const now = Date.now();
-    const msUntilBoundary = RATCHET_INTERVAL - (now % RATCHET_INTERVAL);
-    setTimeout(() => {
-      ratchet();
-      setInterval(ratchet, RATCHET_INTERVAL);
-    }, msUntilBoundary);
   }
 });
