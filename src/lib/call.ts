@@ -237,7 +237,6 @@ function startStageReactivity(stream: MediaStream) {
 
     if (mediaStage) {
       mediaStage.style.setProperty('--talk-level', talkLevel.toFixed(3));
-      mediaStage.style.setProperty('--stripe-speed', `${Math.max(1.7, 3 - talkLevel * 1.1).toFixed(2)}s`);
     }
 
     animFrameId = requestAnimationFrame(tick);
@@ -252,7 +251,6 @@ function startStageReactivity(stream: MediaStream) {
 
     if (mediaStage) {
       mediaStage.style.removeProperty('--talk-level');
-      mediaStage.style.removeProperty('--stripe-speed');
     }
   };
 }

@@ -50,11 +50,6 @@
   50% { transform: scale(1.05); box-shadow: 0 0 40px 8px rgba(249, 115, 22, 0.15); }
 }
 
-@keyframes stripe-shift {
-  from { background-position: center, center, 0% 0%; }
-  to { background-position: center, center, 110% 0%; }
-}
-
 /* Stage */
 .orb-container {
   --stage-size: clamp(17rem, 78vw, 30rem);
@@ -62,7 +57,6 @@
   --video-shell-size: clamp(15rem, 68vw, 22rem);
   --preview-size: clamp(4.9rem, 22vw, 7rem);
   --talk-level: 0;
-  --stripe-speed: 3s;
   position: relative;
   display: flex;
   align-items: center;
@@ -107,29 +101,7 @@
   overflow: hidden;
   border-radius: 50%;
   background-color: var(--color-primary);
-  background-image:
-    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34), transparent 38%),
-    linear-gradient(145deg, #ffb36b 0%, #fb7a1d 44%, #c54d07 100%);
-  background-size: 100% 100%, 100% 100%;
-  background-position: center, center;
   box-shadow: 0 20px 70px rgba(249, 115, 22, 0.24);
-}
-
-.orb-button::before,
-.call-media-shell::before {
-  content: "";
-  position: absolute;
-  inset: -28%;
-  background-image: repeating-linear-gradient(
-    122deg,
-    rgba(255, 245, 232, 0.58) 0 13px,
-    rgba(255, 255, 255, 0.16) 13px 24px,
-    rgba(198, 82, 12, 0.12) 24px 36px
-  );
-  opacity: 0.78;
-  animation: stripe-shift var(--stripe-speed) linear infinite;
-  transform: rotate(6deg);
-  pointer-events: none;
 }
 
 .orb-button {
