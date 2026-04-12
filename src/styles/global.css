@@ -58,7 +58,8 @@
 /* Stage */
 .orb-container {
   --stage-size: clamp(17rem, 78vw, 30rem);
-  --shell-size: clamp(11.5rem, 52vw, 18.5rem);
+  --audio-shell-size: clamp(8.75rem, 42vw, 12rem);
+  --video-shell-size: clamp(15rem, 68vw, 22rem);
   --preview-size: clamp(4.9rem, 22vw, 7rem);
   --talk-level: 0;
   --stripe-speed: 3s;
@@ -102,30 +103,49 @@
 
 .orb-button,
 .call-media-shell {
+  position: relative;
+  overflow: hidden;
   border-radius: 50%;
   background-color: var(--color-primary);
   background-image:
-    radial-gradient(circle at 28% 28%, rgba(255, 255, 255, 0.26), transparent 42%),
-    linear-gradient(135deg, #fdba74 0%, #f97316 48%, #c2410c 100%),
-    repeating-linear-gradient(120deg, rgba(255, 255, 255, 0.22) 0 12px, rgba(255, 255, 255, 0.03) 12px 26px);
-  background-size: 100% 100%, 100% 100%, 180% 180%;
-  background-position: center, center, 0% 0%;
+    radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34), transparent 38%),
+    linear-gradient(145deg, #ffb36b 0%, #fb7a1d 44%, #c54d07 100%);
+  background-size: 100% 100%, 100% 100%;
+  background-position: center, center;
   box-shadow: 0 20px 70px rgba(249, 115, 22, 0.24);
 }
 
+.orb-button::before,
+.call-media-shell::before {
+  content: "";
+  position: absolute;
+  inset: -28%;
+  background-image: repeating-linear-gradient(
+    122deg,
+    rgba(255, 245, 232, 0.58) 0 13px,
+    rgba(255, 255, 255, 0.16) 13px 24px,
+    rgba(198, 82, 12, 0.12) 24px 36px
+  );
+  opacity: 0.78;
+  animation: stripe-shift var(--stripe-speed) linear infinite;
+  transform: rotate(6deg);
+  pointer-events: none;
+}
+
 .orb-button {
-  position: relative;
   z-index: 10;
-  width: var(--shell-size);
-  height: var(--shell-size);
+  width: var(--audio-shell-size);
+  height: var(--audio-shell-size);
   color: white;
   border: none;
   cursor: pointer;
-  display: flex;
   align-items: center;
   justify-content: center;
   transition: transform 0.1s ease-out, box-shadow 0.3s ease;
-  animation: stripe-shift 3.2s linear infinite;
+}
+
+.orb-button:not(.hidden) {
+  display: flex;
 }
 
 .orb-button:hover {
@@ -156,22 +176,28 @@
 .call-media-stage {
   position: relative;
   z-index: 10;
-  width: var(--shell-size);
-  height: var(--shell-size);
-  display: flex;
+  width: var(--audio-shell-size);
+  height: var(--audio-shell-size);
   align-items: center;
   justify-content: center;
+  transition: width 220ms ease-out, height 220ms ease-out;
+}
+
+.call-media-stage:not(.hidden) {
+  display: flex;
 }
 
 .call-media-shell {
-  position: relative;
   width: 100%;
   height: 100%;
-  overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.35);
   transition: transform 160ms ease-out, box-shadow 220ms ease-out;
   transform: scale(calc(1 + var(--talk-level) * 0.04));
-  animation: stripe-shift var(--stripe-speed) linear infinite;
+}
+
+.call-media-stage[data-mode="video"] {
+  width: var(--video-shell-size);
+  height: var(--video-shell-size);
 }
 
 .call-media-placeholder {
@@ -182,6 +208,7 @@
   justify-content: center;
   color: white;
   pointer-events: none;
+  z-index: 2;
 }
 
 .call-media-icon {
@@ -197,6 +224,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+  z-index: 1;
 }
 
 .local-preview-shell {
@@ -293,7 +321,8 @@
 @media (max-width: 640px) {
   .orb-container {
     --stage-size: clamp(15rem, 78vw, 22rem);
-    --shell-size: clamp(10.75rem, 54vw, 15.5rem);
+    --audio-shell-size: clamp(8rem, 44vw, 10.25rem);
+    --video-shell-size: clamp(12.75rem, 72vw, 18rem);
   }
 
   .local-preview-shell {
