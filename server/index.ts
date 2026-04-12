@@ -3,8 +3,16 @@ import express from 'express';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} must be set`);
+  }
+  return value;
+}
+
 const port = parseInt(process.env.PEER_PORT || '9000');
-const TURN_SECRET = process.env.TURN_SECRET || 'telvy-dev-secret';
+const TURN_SECRET = requireEnv('TURN_SECRET');
 const TURN_TTL = 3600;
 const TURN_DOMAIN = process.env.TURN_DOMAIN || 'localhost';
 
