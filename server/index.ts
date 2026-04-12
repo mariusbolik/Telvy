@@ -64,6 +64,10 @@ type RoomState = {
   peers: Set<WebSocket>;
 };
 
+type ServerFrame =
+  | { source: 'server'; type: 'peer-joined' | 'peer-left' }
+  | { source: 'server'; type: 'signal'; payload: string };
+
 const rooms = new Map<string, RoomState>();
 const MAX_PEERS = 2;
 
@@ -71,6 +75,10 @@ function normalizeAdmissionProof(proof: string): string {
   return createHash('sha256')
     .update(proof)
     .digest('hex');
+}
+
+function sendServerFrame(peer: WebSocket, frame: ServerFrame) {
+  peer.send(JSON.stringify(frame));
 }
 
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
@@ -110,10 +118,10 @@ wss.on('connection', (ws, req) => {
 
   roomState.peers.add(ws);
 
-  // Notify existing peers (unencrypted control message)
+  // Notify existing peers with a reserved server-only control frame.
   for (const peer of roomState.peers) {
     if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-      peer.send(JSON.stringify({ type: 'peer-joined' }));
+      sendServerFrame(peer, { source: 'server', type: 'peer-joined' });
     }
   }
 
@@ -122,7 +130,7 @@ wss.on('connection', (ws, req) => {
     const msg = data.toString();
     for (const peer of roomState!.peers) {
       if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-        peer.send(msg);
+        sendServerFrame(peer, { source: 'server', type: 'signal', payload: msg });
       }
     }
   });
@@ -133,7 +141,7 @@ wss.on('connection', (ws, req) => {
     // Notify remaining peers
     for (const peer of roomState!.peers) {
       if (peer.readyState === WebSocket.OPEN) {
-        peer.send(JSON.stringify({ type: 'peer-left' }));
+        sendServerFrame(peer, { source: 'server', type: 'peer-left' });
       }
     }
 

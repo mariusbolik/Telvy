@@ -12,10 +12,28 @@ type SignalingMessage =
   | { type: 'answer'; sdp: string }
   | { type: 'candidate'; candidate: RTCIceCandidateInit };
 
+type ServerFrame =
+  | { source: 'server'; type: 'peer-joined' | 'peer-left' }
+  | { source: 'server'; type: 'signal'; payload: string };
+
 function isSignalingMessage(msg: unknown): msg is SignalingMessage {
   if (typeof msg !== 'object' || msg === null) return false;
   const { type } = msg as { type?: unknown };
   return type === 'offer' || type === 'answer' || type === 'candidate';
+}
+
+function isServerFrame(msg: unknown): msg is ServerFrame {
+  if (typeof msg !== 'object' || msg === null) return false;
+
+  const { source, type, payload } = msg as {
+    source?: unknown;
+    type?: unknown;
+    payload?: unknown;
+  };
+
+  if (source !== 'server') return false;
+  if (type === 'peer-joined' || type === 'peer-left') return true;
+  return type === 'signal' && typeof payload === 'string';
 }
 
 const supportsE2EE =
@@ -282,33 +300,33 @@ export async function initCall(
   };
 
   ws.onmessage = async (event) => {
-    const raw = event.data as string;
-
-    // Control messages from server (unencrypted JSON)
+    let frame: unknown;
     try {
-      const ctrl: unknown = JSON.parse(raw);
-      if (typeof ctrl === 'object' && ctrl !== null && 'type' in ctrl) {
-        const { type } = ctrl as { type: unknown };
-        if (type === 'peer-joined') {
-          // We were here first — create offer
-          createPC();
-          const offer = await pc!.createOffer();
-          await pc!.setLocalDescription(offer);
-          send({ type: 'offer', sdp: offer.sdp });
-          return;
-        }
-        if (type === 'peer-left') {
-          cleanup();
-          setState('waiting');
-          document.getElementById('share-section')?.classList.remove('hidden');
-          return;
-        }
-      }
-    } catch { /* not JSON — must be encrypted */ }
+      frame = JSON.parse(event.data as string);
+    } catch {
+      return;
+    }
 
-    // Encrypted signaling from peer
+    if (!isServerFrame(frame)) return;
+
+    if (frame.type === 'peer-joined') {
+      // We were here first — create offer
+      createPC();
+      const offer = await pc!.createOffer();
+      await pc!.setLocalDescription(offer);
+      send({ type: 'offer', sdp: offer.sdp });
+      return;
+    }
+
+    if (frame.type === 'peer-left') {
+      cleanup();
+      setState('waiting');
+      document.getElementById('share-section')?.classList.remove('hidden');
+      return;
+    }
+
     try {
-      const msg = await decryptSignaling(sigKey, raw);
+      const msg = await decryptSignaling(sigKey, frame.payload);
       if (!isSignalingMessage(msg)) return;
 
       if (msg.type === 'offer') {
@@ -335,7 +353,7 @@ export async function initCall(
         }
       }
     } catch {
-      // Decryption failed — wrong PIN or corrupted message
+      // Decryption failed — wrong PIN, stale secret, or corrupted message.
     }
   };
 
