@@ -5,7 +5,6 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
 <Layout title="Telvy">
   <div id="app" data-state="idle" class="flex flex-col min-h-screen">
-    <!-- Header -->
     <header class="flex items-center justify-between px-6 py-4 animate-fade-in">
       <a href="/" class="text-xl font-bold tracking-tight">
         Tel<span class="text-primary">vy</span>
@@ -16,20 +15,15 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
     </header>
 
-    <!-- Main Content -->
     <main class="flex-1 flex flex-col items-center justify-center px-4 -mt-16">
-
-      <!-- Room ID (visible in call states) -->
       <div id="room-display" class="mb-6 text-center hidden animate-fade-in">
         <p id="room-id" class="text-2xl font-semibold tracking-wide text-gray-800"></p>
         <div class="flex items-center justify-center gap-2 mt-2">
           <span id="status-dot" class="status-dot"></span>
           <span id="status-text" class="text-sm text-gray-500"></span>
-          <span id="verification-code" class="text-sm font-mono text-secure font-medium ml-2 hidden"></span>
         </div>
       </div>
 
-      <!-- Central Orb -->
       <div class="orb-container animate-scale-in">
         <div class="orb-ring orb-ring-1"></div>
         <div class="orb-ring orb-ring-2"></div>
@@ -39,30 +33,46 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
         </button>
       </div>
 
-      <!-- Call to Action (landing state) -->
       <div id="landing-cta" class="mt-8 text-center animate-fade-in-up" style="animation-delay: 0.15s">
-        <p class="text-gray-500 text-lg">Tap to start a secure call</p>
+        <p class="text-gray-500 text-lg">Tap to start a new call</p>
       </div>
 
-      <!-- Optional PIN (visible before and during call) -->
-      <div id="pin-section" class="mt-4 animate-fade-in">
-        <input id="room-pin" type="password" placeholder="Optional PIN" maxlength="32" autocomplete="off"
-          class="text-center text-sm bg-gray-50 rounded-lg px-4 py-2 border border-gray-200 w-40 focus:outline-none focus:border-primary/50 transition-colors" />
+      <div id="phrase-section" class="mt-4 w-full max-w-sm animate-fade-in">
+        <form id="phrase-form" class="flex items-center gap-2">
+          <input id="room-phrase-input" type="text" placeholder="Or enter a 3-word phrase" autocomplete="off"
+            class="flex-1 text-center text-sm bg-gray-50 rounded-lg px-4 py-2 border border-gray-200 focus:outline-none focus:border-primary/50 transition-colors" />
+          <button id="join-call-btn" type="submit"
+            class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors">
+            Join
+          </button>
+        </form>
+        <p id="phrase-error" class="mt-2 text-center text-sm text-red-600 hidden"></p>
       </div>
 
-      <!-- Share Link (waiting state) -->
       <div id="share-section" class="mt-8 text-center hidden">
-        <p class="text-sm text-gray-500 mb-3">Share this link to invite someone</p>
+        <p class="text-sm text-gray-500 mb-3">Share these 3 words</p>
         <div class="inline-flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-2.5 border border-gray-200">
-          <span id="share-url" class="text-sm font-mono text-gray-700 max-w-xs truncate"></span>
-          <button id="copy-btn" class="text-gray-400 hover:text-primary transition-colors relative" title="Copy link">
+          <span id="share-phrase" class="text-sm font-mono text-gray-700 max-w-xs truncate"></span>
+          <button id="copy-btn" class="text-gray-400 hover:text-primary transition-colors relative" title="Copy phrase">
             <span id="copy-icon"><Copy class="w-4 h-4" /></span>
             <span id="copied-icon" class="hidden"><Check class="w-4 h-4 text-secure" /></span>
           </button>
         </div>
+        <p class="mt-2 text-xs text-gray-500">You can also send the full link for one-tap join.</p>
       </div>
 
-      <!-- Controls (call states) -->
+      <div id="verification-panel" class="mt-6 max-w-sm w-full text-center hidden animate-fade-in">
+        <p class="text-xs font-semibold tracking-[0.16em] text-secure uppercase">Verify Before You Talk</p>
+        <div class="mt-3 flex items-center justify-center gap-3 bg-secure/5 border border-secure/20 rounded-2xl px-4 py-3">
+          <span id="verification-code" class="text-xl font-mono font-semibold tracking-[0.24em] text-secure"></span>
+          <button id="verify-call" type="button"
+            class="px-3 py-1.5 text-xs font-medium rounded-full border border-secure/25 text-secure hover:bg-secure/10 transition-colors">
+            Codes match
+          </button>
+        </div>
+        <p id="verification-hint" class="mt-2 text-sm text-gray-500">Read this code aloud on both devices. Matching numbers detect active interception.</p>
+      </div>
+
       <div id="controls" class="mt-10 flex items-center gap-3 hidden animate-fade-in-up">
         <button id="toggle-mic" class="control-btn" title="Toggle microphone">
           <span id="mic-on"><Mic class="w-5 h-5" /></span>
@@ -80,10 +90,8 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
         </button>
       </div>
 
-      <!-- Hidden audio element for remote audio playback -->
       <audio id="remote-audio" autoplay playsinline></audio>
 
-      <!-- Video (hidden by default, shown when video toggled) -->
       <div id="video-section" class="relative hidden mt-8 w-full max-w-2xl animate-scale-in">
         <div class="relative aspect-video bg-gray-100 rounded-2xl overflow-hidden border border-gray-200">
           <video id="remote-video" autoplay playsinline class="w-full h-full object-cover"></video>
@@ -93,7 +101,6 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
         </div>
       </div>
 
-      <!-- Ended state -->
       <div id="ended-section" class="mt-8 text-center hidden animate-fade-in">
         <p class="text-gray-500 text-lg mb-4">Call ended</p>
         <button id="new-call-btn" class="px-6 py-2.5 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover transition-colors">
@@ -102,7 +109,6 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
     </main>
 
-    <!-- E2EE Badge (shown when connected) -->
     <div id="e2ee-badge" class="hidden fixed bottom-24 left-1/2 -translate-x-1/2 animate-fade-in">
       <div class="flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 border border-gray-200 shadow-sm">
         <Shield class="w-3 h-3 text-secure" />
@@ -110,7 +116,6 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
     </div>
 
-    <!-- Technical Details -->
     <section class="px-6 pb-8 max-w-2xl mx-auto w-full animate-fade-in" style="animation-delay: 0.3s">
       <details class="rounded-xl border border-gray-200 group">
         <summary class="p-5 cursor-pointer flex items-center justify-between hover:bg-gray-50 rounded-xl transition-colors">
@@ -124,43 +129,31 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
           <ul class="space-y-3 text-sm text-gray-500">
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">End-to-end encrypted</strong> — Only you and the other person hold the keys. No server — not even ours — can decrypt your audio or video. Your call content is completely inaccessible to any third party.</span>
+              <span><strong class="text-gray-700">End-to-end encrypted</strong> — Audio and video are encrypted between browsers with DTLS-SRTP plus an additional AES-256-GCM media layer.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">No logs</strong> — We do not log any call data, connection metadata, IP addresses, or usage analytics. There is no database — nothing to hack, subpoena, or leak.</span>
+              <span><strong class="text-gray-700">3 words only</strong> — The phrase is the only thing users need to share. Telvy derives a separate room tag from it so the raw phrase is never sent to the signaling server.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Full anonymity</strong> — Your IP address is never exposed to the other participant. All media is routed through a TURN relay so neither side learns the other's location or network identity.</span>
+              <span><strong class="text-gray-700">Slow key stretching</strong> — The 3-word phrase is expanded client-side with a slow PBKDF2 step before signaling and media keys are derived. That raises the cost of brute-forcing short phrases.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Fully hosted in Switzerland</strong> — All infrastructure — signaling, relay, and static assets — is hosted in Switzerland. Your data is subject to Swiss data protection regulations, not US, EU, or any other jurisdiction.</span>
+              <span><strong class="text-gray-700">Verify the safety number</strong> — Read the 6-digit code aloud after connecting. Matching codes detect active interception and should be part of every sensitive call.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Double encryption</strong> — Every call is protected by two independent encryption layers: WebRTC DTLS-SRTP and an additional AES-256-GCM layer using the Encoded Transform API.</span>
+              <span><strong class="text-gray-700">No logs</strong> — We do not log call data, connection metadata, or analytics. Room state lives only in memory while the call exists.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Encrypted signaling</strong> — Connection setup messages are encrypted client-side before reaching any server. Keys are derived from a random secret embedded in the share link fragment, which browsers do not send in HTTP requests.</span>
+              <span><strong class="text-gray-700">Full anonymity</strong> — All media is routed through TURN so neither participant learns the other's IP address directly.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">TURN relay</strong> — All media is routed through our Swiss-hosted relay. Neither participant reveals their IP address to the other. The relay cannot decrypt any content.</span>
-            </li>
-            <li class="flex items-start gap-2">
-              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Safety numbers</strong> — A verification code derived from both participants' cryptographic fingerprints (SHA-256) lets you confirm no man-in-the-middle attack occurred.</span>
-            </li>
-            <li class="flex items-start gap-2">
-              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Metadata minimization</strong> — Internal network addresses and device identifiers are stripped from all connection data before transmission.</span>
-            </li>
-            <li class="flex items-start gap-2">
-              <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Zero persistence</strong> — Rooms exist only in memory while active. No database, no logs, no analytics. The source code is open for anyone to verify.</span>
+              <span><strong class="text-gray-700">Swiss hosted</strong> — Static assets, signaling, and relay infrastructure can all live on the same Swiss VPS under your control.</span>
             </li>
           </ul>
         </div>
@@ -170,60 +163,96 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
   <script>
     import { initCall } from '../lib/call';
-    import { buildShareUrl, generateShareSecret, parseCallUrl } from '../lib/call-link';
-    import { generateRoomId } from '../lib/room-id';
+    import {
+      buildShareUrl,
+      formatRoomPhrase,
+      generateRoomPhrase,
+      parseCallUrl,
+      parseRoomPhraseInput,
+    } from '../lib/room-phrase';
 
     const app = document.getElementById('app')!;
     const orbButton = document.getElementById('orb-button')!;
-    const initialUrl = new URL(location.href);
-    const initialRoom = initialUrl.searchParams.get('room');
-    const initialCall = parseCallUrl(initialUrl);
+    const phraseInput = document.getElementById('room-phrase-input') as HTMLInputElement | null;
+    const phraseError = document.getElementById('phrase-error');
 
-    // If URL has room material, auto-join only with a complete secure link.
-    if (initialCall) {
-      startCall(initialCall.roomId, initialCall.shareSecret);
-    } else if (initialRoom) {
-      showJoinError(initialRoom, 'This call link is incomplete or invalid.');
+    function setPhraseError(message: string) {
+      if (!phraseError) return;
+
+      if (!message) {
+        phraseError.classList.add('hidden');
+        phraseError.textContent = '';
+        return;
+      }
+
+      phraseError.textContent = message;
+      phraseError.classList.remove('hidden');
     }
 
-    // Orb click — start a new call
+    const initialUrl = new URL(location.href);
+    const initialPhrase = parseCallUrl(initialUrl);
+
+    if (initialPhrase) {
+      startCall(initialPhrase);
+    } else if (initialUrl.hash) {
+      showJoinError('This call phrase is invalid.');
+    }
+
     orbButton.addEventListener('click', () => {
-      const state = app.dataset.state;
-      if (state === 'idle') {
-        const roomId = generateRoomId();
-        const shareSecret = generateShareSecret();
-        history.pushState(null, '', buildShareUrl(location.origin, roomId, shareSecret));
-        startCall(roomId, shareSecret);
-      }
+      if (app.dataset.state !== 'idle') return;
+
+      const roomPhrase = generateRoomPhrase();
+      history.pushState(null, '', buildShareUrl(location.origin, roomPhrase));
+      startCall(roomPhrase);
     });
 
-    // New call button
+    document.getElementById('phrase-form')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      const roomPhrase = parseRoomPhraseInput(phraseInput?.value || '', location.origin);
+      if (!roomPhrase) {
+        setPhraseError('Enter the same 3-word phrase you were given.');
+        return;
+      }
+
+      history.pushState(null, '', buildShareUrl(location.origin, roomPhrase));
+      startCall(roomPhrase);
+    });
+
     document.getElementById('new-call-btn')?.addEventListener('click', () => {
       history.pushState(null, '', '/');
       resetToLanding();
     });
 
-    function startCall(roomId: string, shareSecret: string) {
-      const pin = (document.getElementById('room-pin') as HTMLInputElement)?.value || undefined;
-      const shareUrl = buildShareUrl(location.origin, roomId, shareSecret);
-      document.getElementById('room-id')!.textContent = roomId;
-      document.getElementById('share-url')!.textContent = shareUrl;
+    function startCall(roomPhrase: string) {
+      const formattedPhrase = formatRoomPhrase(roomPhrase);
+
+      setPhraseError('');
+      if (phraseInput) phraseInput.value = formattedPhrase;
+
+      document.getElementById('room-id')!.textContent = formattedPhrase;
+      document.getElementById('share-phrase')!.textContent = formattedPhrase;
       document.getElementById('room-display')!.classList.remove('hidden');
+      document.getElementById('phrase-section')!.classList.add('hidden');
       document.getElementById('share-section')!.classList.remove('hidden');
       document.getElementById('controls')!.classList.remove('hidden');
       document.getElementById('landing-cta')!.classList.add('hidden');
       document.getElementById('ended-section')!.classList.add('hidden');
-      initCall(roomId, shareSecret, pin);
+      document.getElementById('verification-panel')!.classList.add('hidden');
+
+      initCall(roomPhrase);
     }
 
-    function showJoinError(roomId: string, message: string) {
+    function showJoinError(message: string, roomPhrase?: string) {
       app.dataset.state = 'disconnected';
-      document.getElementById('room-id')!.textContent = roomId;
+      document.getElementById('room-id')!.textContent = roomPhrase ? formatRoomPhrase(roomPhrase) : 'Call unavailable';
       document.getElementById('room-display')!.classList.remove('hidden');
       document.getElementById('status-dot')!.className = 'status-dot disconnected';
       document.getElementById('status-text')!.textContent = message;
+      document.getElementById('phrase-section')!.classList.add('hidden');
       document.getElementById('share-section')!.classList.add('hidden');
       document.getElementById('controls')!.classList.add('hidden');
+      document.getElementById('verification-panel')!.classList.add('hidden');
       document.getElementById('landing-cta')!.classList.add('hidden');
       document.getElementById('ended-section')!.classList.remove('hidden');
     }
@@ -231,23 +260,25 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
     function resetToLanding() {
       app.dataset.state = 'idle';
       document.getElementById('room-display')!.classList.add('hidden');
+      document.getElementById('phrase-section')!.classList.remove('hidden');
       document.getElementById('share-section')!.classList.add('hidden');
       document.getElementById('controls')!.classList.add('hidden');
       document.getElementById('video-section')!.classList.add('hidden');
+      document.getElementById('verification-panel')!.classList.add('hidden');
       document.getElementById('ended-section')!.classList.add('hidden');
       document.getElementById('e2ee-badge')!.classList.add('hidden');
       document.getElementById('landing-cta')!.classList.remove('hidden');
+      setPhraseError('');
     }
 
-    // Handle back/forward navigation
     window.addEventListener('popstate', () => {
       const nextUrl = new URL(location.href);
-      const nextRoom = nextUrl.searchParams.get('room');
-      const nextCall = parseCallUrl(nextUrl);
-      if (nextCall) {
-        startCall(nextCall.roomId, nextCall.shareSecret);
-      } else if (nextRoom) {
-        showJoinError(nextRoom, 'This call link is incomplete or invalid.');
+      const nextPhrase = parseCallUrl(nextUrl);
+
+      if (nextPhrase) {
+        startCall(nextPhrase);
+      } else if (nextUrl.hash) {
+        showJoinError('This call phrase is invalid.');
       } else {
         resetToLanding();
       }

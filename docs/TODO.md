@@ -5,7 +5,7 @@
 ### E2EE Rekeying
 
 - Keep the current single per-call SFrame key as the default design.
-- Do not reintroduce the old timer-based HKDF ratchet. It added complexity in the media path, caused real-time sync problems, and did not provide strong forward secrecy because the full chain remained derivable from `roomId + PIN`.
+- Do not reintroduce the old timer-based HKDF ratchet. It added complexity in the media path, caused real-time sync problems, and did not provide strong forward secrecy because the full chain remained derivable from the shared invite secret.
 - If stronger post-compromise protection is needed later, add an authenticated ephemeral rekey exchange instead of a deterministic ratchet.
 
 ### Why Not the Old Ratchet
@@ -16,7 +16,7 @@
 
 ### If We Ever Upgrade
 
-- Bootstrap the call with the existing room-derived key.
+- Bootstrap the call with the existing phrase-derived key.
 - During the call, generate fresh ephemeral ECDH keypairs on both peers.
 - Exchange ephemeral public keys over encrypted signaling.
 - Authenticate each rekey message with the current session key and bind it to the current call context.

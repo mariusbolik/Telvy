@@ -1,5 +1,10 @@
 // Cryptographic utilities — Web Crypto API only, zero external dependencies.
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+const MASTER_KEY_SALT = 'telvy-master-v1';
+const MASTER_KEY_ITERATIONS = 750_000;
+
 // --- Base64 ---
 
 export function arrayBufferToBase64(buf: ArrayBuffer): string {
@@ -24,81 +29,91 @@ function arrayBufferToHex(buf: ArrayBuffer): string {
   return Array.from(new Uint8Array(buf), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-// --- HKDF key derivation ---
+// --- Slow phrase derivation ---
 
-function composeSecretMaterial(roomId: string, shareSecret: string, pin?: string): string {
-  return JSON.stringify({ roomId, shareSecret, pin: pin || '' });
+async function deriveMasterKey(roomPhrase: string): Promise<CryptoKey> {
+  const phraseKey = await crypto.subtle.importKey(
+    'raw',
+    textEncoder.encode(roomPhrase),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+
+  const masterSecret = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      hash: 'SHA-256',
+      salt: textEncoder.encode(MASTER_KEY_SALT),
+      iterations: MASTER_KEY_ITERATIONS,
+    },
+    phraseKey,
+    256,
+  );
+
+  return crypto.subtle.importKey(
+    'raw',
+    masterSecret,
+    'HKDF',
+    false,
+    ['deriveBits', 'deriveKey'],
+  );
 }
 
-async function deriveKey(
-  input: string,
+async function deriveAesKey(
+  masterKey: CryptoKey,
   salt: string,
   info: string,
 ): Promise<CryptoKey> {
-  const ikm = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(input),
-    'HKDF',
-    false,
-    ['deriveKey'],
-  );
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: new TextEncoder().encode(salt),
-      info: new TextEncoder().encode(info),
+      salt: textEncoder.encode(salt),
+      info: textEncoder.encode(info),
     },
-    ikm,
+    masterKey,
     { name: 'AES-GCM', length: 256 },
     true,
     ['encrypt', 'decrypt'],
   );
 }
 
-// Derive signaling encryption key from the public room ID plus the secret link fragment.
-export function deriveSignalingKey(
-  roomId: string,
-  shareSecret: string,
-  pin?: string,
-): Promise<CryptoKey> {
-  return deriveKey(
-    composeSecretMaterial(roomId, shareSecret, pin),
-    'telvy-signaling-v1',
-    'signaling',
+async function deriveRoomTag(masterKey: CryptoKey): Promise<string> {
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: textEncoder.encode('telvy-room-tag-v1'),
+      info: textEncoder.encode('room-tag'),
+    },
+    masterKey,
+    256,
   );
+
+  return arrayBufferToHex(bits);
 }
 
-// Derive E2EE media key from the public room ID plus the secret link fragment.
-export function deriveCallKey(
-  roomId: string,
-  shareSecret: string,
-  pin?: string,
-): Promise<CryptoKey> {
-  return deriveKey(
-    composeSecretMaterial(roomId, shareSecret, pin),
-    'telvy-call-v1',
-    'e2ee-media',
-  );
-}
+export async function deriveCallSecrets(roomPhrase: string): Promise<{
+  roomTag: string;
+  signalingKey: CryptoKey;
+  callKey: CryptoKey;
+}> {
+  const masterKey = await deriveMasterKey(roomPhrase);
+  const [roomTag, signalingKey, callKey] = await Promise.all([
+    deriveRoomTag(masterKey),
+    deriveAesKey(masterKey, 'telvy-signaling-v1', 'signaling'),
+    deriveAesKey(masterKey, 'telvy-call-v1', 'e2ee-media'),
+  ]);
 
-export async function deriveAdmissionProof(
-  roomId: string,
-  shareSecret: string,
-  pin?: string,
-): Promise<string> {
-  const payload = new TextEncoder().encode(
-    composeSecretMaterial(roomId, shareSecret, pin) + '|telvy-admission-v1',
-  );
-  const digest = await crypto.subtle.digest('SHA-256', payload);
-  return arrayBufferToHex(digest);
+  return { roomTag, signalingKey, callKey };
 }
 
 // --- Encrypted signaling ---
 
 export async function encryptSignaling(key: CryptoKey, data: object): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(JSON.stringify(data));
+  const plaintext = textEncoder.encode(JSON.stringify(data));
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
 
   const combined = new Uint8Array(12 + ciphertext.byteLength);
@@ -114,7 +129,7 @@ export async function decryptSignaling(key: CryptoKey, encoded: string): Promise
   const ciphertext = combined.slice(12);
 
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-  return JSON.parse(new TextDecoder().decode(plaintext));
+  return JSON.parse(textDecoder.decode(plaintext));
 }
 
 // --- Safety numbers ---
@@ -134,7 +149,7 @@ export async function computeVerificationCode(
   if (!localFp || !remoteFp) return '--- ---';
 
   const sorted = [localFp, remoteFp].sort();
-  const input = new TextEncoder().encode(sorted[0] + '|' + sorted[1]);
+  const input = textEncoder.encode(sorted[0] + '|' + sorted[1]);
   const hash = await crypto.subtle.digest('SHA-256', input);
 
   const view = new DataView(hash);

@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import express from 'express';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -11,6 +11,22 @@ function requireEnv(name: string): string {
   return value;
 }
 
+type RateLimitEntry = {
+  count: number;
+  reset: number;
+};
+
+type ServerFrame =
+  | { source: 'server'; type: 'peer-joined' | 'peer-left' }
+  | { source: 'server'; type: 'signal'; payload: string };
+
+const ROOM_TAG_PATTERN = /^[a-f0-9]{64}$/;
+const MAX_PEERS = 2;
+const TURN_RATE_LIMIT = 10;
+const JOIN_IP_RATE_LIMIT = 20;
+const JOIN_ROOM_RATE_LIMIT = 12;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
 const port = parseInt(process.env.PEER_PORT || '9000');
 const TURN_SECRET = requireEnv('TURN_SECRET');
 const TURN_TTL = 3600;
@@ -19,33 +35,48 @@ const TURN_DOMAIN = process.env.TURN_DOMAIN || 'localhost';
 const app = express();
 const httpServer = createServer(app);
 
-// --- Rate limiting ---
+const turnRateLimits = new Map<string, RateLimitEntry>();
+const joinIpRateLimits = new Map<string, RateLimitEntry>();
+const joinRoomRateLimits = new Map<string, RateLimitEntry>();
+const rooms = new Map<string, Set<WebSocket>>();
 
-const rateLimitMap = new Map<string, { count: number; reset: number }>();
-
-function rateLimit(ip: string): boolean {
+function exceedsRateLimit(
+  store: Map<string, RateLimitEntry>,
+  key: string,
+  limit: number,
+): boolean {
   const now = Date.now();
-  const entry = rateLimitMap.get(ip);
+  const entry = store.get(key);
+
   if (!entry || now > entry.reset) {
-    rateLimitMap.set(ip, { count: 1, reset: now + 60_000 });
+    store.set(key, { count: 1, reset: now + RATE_LIMIT_WINDOW_MS });
     return false;
   }
+
   entry.count++;
-  return entry.count > 10;
+  return entry.count > limit;
 }
 
-setInterval(() => {
+function pruneRateLimits() {
   const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now > entry.reset) rateLimitMap.delete(ip);
+  for (const store of [turnRateLimits, joinIpRateLimits, joinRoomRateLimits]) {
+    for (const [key, entry] of store) {
+      if (now > entry.reset) store.delete(key);
+    }
   }
-}, 300_000);
+}
+
+function sendServerFrame(peer: WebSocket, frame: ServerFrame) {
+  peer.send(JSON.stringify(frame));
+}
+
+setInterval(pruneRateLimits, 300_000);
 
 // --- TURN credentials ---
 
 app.get('/api/turn-credentials', (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  if (rateLimit(ip)) {
+  if (exceedsRateLimit(turnRateLimits, ip, TURN_RATE_LIMIT)) {
     res.status(429).json({ error: 'Too many requests' });
     return;
   }
@@ -67,95 +98,65 @@ app.get('/api/turn-credentials', (req, res) => {
 
 // --- WebSocket signaling relay ---
 
-type RoomState = {
-  joinProof: string;
-  peers: Set<WebSocket>;
-};
-
-type ServerFrame =
-  | { source: 'server'; type: 'peer-joined' | 'peer-left' }
-  | { source: 'server'; type: 'signal'; payload: string };
-
-const rooms = new Map<string, RoomState>();
-const MAX_PEERS = 2;
-
-function normalizeAdmissionProof(proof: string): string {
-  return createHash('sha256')
-    .update(proof)
-    .digest('hex');
-}
-
-function sendServerFrame(peer: WebSocket, frame: ServerFrame) {
-  peer.send(JSON.stringify(frame));
-}
-
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
-  const roomId = url.searchParams.get('room');
-  const joinProof = url.searchParams.get('proof');
+  const roomTag = url.searchParams.get('roomTag');
+  const ip = req.socket.remoteAddress || 'unknown';
 
-  if (!roomId) {
-    ws.close(4000, 'Missing room parameter');
+  if (!roomTag || !ROOM_TAG_PATTERN.test(roomTag)) {
+    ws.close(4000, 'Missing room tag');
     return;
   }
 
-  if (!joinProof) {
-    ws.close(4002, 'Missing room proof');
+  if (
+    exceedsRateLimit(joinIpRateLimits, ip, JOIN_IP_RATE_LIMIT) ||
+    exceedsRateLimit(joinRoomRateLimits, roomTag, JOIN_ROOM_RATE_LIMIT)
+  ) {
+    ws.close(4004, 'Too many join attempts');
     return;
   }
 
-  // Get or create room
-  let roomState = rooms.get(roomId);
-  if (!roomState) {
-    roomState = {
-      joinProof: normalizeAdmissionProof(joinProof),
-      peers: new Set(),
-    };
-    rooms.set(roomId, roomState);
-  } else if (roomState.joinProof !== normalizeAdmissionProof(joinProof)) {
-    ws.close(4003, 'Invalid room secret');
-    return;
+  let room = rooms.get(roomTag);
+  if (!room) {
+    room = new Set();
+    rooms.set(roomTag, room);
   }
 
-  if (roomState.peers.size >= MAX_PEERS) {
+  if (room.size >= MAX_PEERS) {
     ws.close(4001, 'Room full');
     return;
   }
 
-  roomState.peers.add(ws);
+  room.add(ws);
 
-  // Notify existing peers with a reserved server-only control frame.
-  for (const peer of roomState.peers) {
+  for (const peer of room) {
     if (peer !== ws && peer.readyState === WebSocket.OPEN) {
       sendServerFrame(peer, { source: 'server', type: 'peer-joined' });
     }
   }
 
-  // Relay messages (server sees only encrypted blobs)
   ws.on('message', (data) => {
-    const msg = data.toString();
-    for (const peer of roomState!.peers) {
+    const payload = data.toString();
+    for (const peer of room!) {
       if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-        sendServerFrame(peer, { source: 'server', type: 'signal', payload: msg });
+        sendServerFrame(peer, { source: 'server', type: 'signal', payload });
       }
     }
   });
 
   ws.on('close', () => {
-    roomState!.peers.delete(ws);
+    room!.delete(ws);
 
-    // Notify remaining peers
-    for (const peer of roomState!.peers) {
+    for (const peer of room!) {
       if (peer.readyState === WebSocket.OPEN) {
         sendServerFrame(peer, { source: 'server', type: 'peer-left' });
       }
     }
 
-    // Clean up empty rooms
-    if (roomState!.peers.size === 0) {
-      rooms.delete(roomId);
+    if (room!.size === 0) {
+      rooms.delete(roomTag);
     }
   });
 });

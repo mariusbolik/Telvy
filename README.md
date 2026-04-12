@@ -23,7 +23,7 @@ Telvy exists because private conversation shouldn't require trusting a corporati
 | **Self-hostable** | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | **No account needed** | ✅ | ❌ phone # | ❌ email | ❌ phone # | ❌ phone # | ❌ email | ❌ Google | ❌ Microsoft | ✅ |
 | **No app install** | ✅ browser | ❌ | ⚠️ | ❌ | ❌ | ⚠️ | ✅ browser | ⚠️ | ✅ browser |
-| **Server can't see media** | ✅ | ✅ | ⚠️ with E2EE | ⚠️ groups no | ✅ | ❌ | ❌ | ❌ | ❌ SFU decodes |
+| **Server can't see media** | ⚠️ phrase-stretched, verify codes | ✅ | ⚠️ with E2EE | ⚠️ groups no | ✅ | ❌ | ❌ | ❌ | ❌ SFU decodes |
 | **IP hidden from peer** | ✅ forced relay | ✅ | ⚠️ depends | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **No metadata logging** | ✅ | ⚠️ minimal | ⚠️ depends | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ configurable |
 | **No third-party services** | ✅ | ❌ Google, AWS | ⚠️ depends | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ Google STUN |
@@ -35,21 +35,23 @@ Telvy exists because private conversation shouldn't require trusting a corporati
 
 Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes your media through their servers. They see your IP, your call metadata, and often your unencrypted media. Telvy doesn't.
 
+- **3 words only** — Share one human phrase, no accounts and no hidden invite secret
 - **E2E encrypted** — Two encryption layers: WebRTC DTLS-SRTP + SFrame (RFC 9605) frame encryption
-- **No servers in the media path** — All traffic relayed through your own TURN server (encrypted, unreadable)
+- **Slow phrase stretching** — The phrase is expanded client-side before signaling and media keys are derived
+- **No third-party media servers** — All traffic is relayed through your own TURN server
 - **Zero third-party requests** — No Google STUN, no CDN, no analytics, no external fonts
 - **Swiss hosted** — Self-host on a Swiss VPS for strongest privacy jurisdiction
 - **No persistence** — No database, no logs, no cookies. Room disappears when you hang up
-- **Verification codes** — Both callers see a 6-digit code to confirm no MITM attack
+- **Verification codes** — Both callers see a 6-digit code and should compare it before sensitive calls
 
 | Feature | Detail |
 |---------|--------|
 | Encryption | DTLS-SRTP + AES-256-GCM (double layer) |
 | IP privacy | Forced TURN relay, peers never learn each other's IP |
 | TURN auth | HMAC-SHA1 credentials, 1-hour TTL, rate-limited |
-| Signaling | Encrypted WebSocket (AES-256-GCM, HKDF-SHA256 derived key) |
-| Session key | E2EE key fixed for call duration, derived from room ID + PIN |
-| Room PINs | Optional PIN for room auth (never sent to server) |
+| Signaling | Encrypted WebSocket (AES-256-GCM, key derived from a stretched 3-word phrase) |
+| Session key | E2EE key fixed for call duration, derived from the same stretched phrase |
+| Invite | One 3-word phrase, optionally shared as a fragment URL |
 | Verification | Safety numbers from DTLS fingerprints |
 | Persistence | Zero. No database, no logs, no cookies |
 | External deps | None. No third-party network requests |
@@ -58,16 +60,16 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 ## How It Works
 
 ```
-You click "Start Call" → get a link like /?room=brave-azure-dolphin
-Share the link → other person opens it → call connects automatically
+You click "Start Call" → get 3 words like brave-azure-dolphin
+Share the phrase or the fragment URL → other person opens it or types it → call connects automatically
 Audio by default. Video optional. One click to end.
 ```
 
 Under the hood:
-1. Native WebRTC with encrypted WebSocket signaling (AES-256-GCM, key derived via HKDF-SHA256 from room ID + optional PIN)
-2. Media is forced through your coturn TURN relay (peers never see each other's IP)
-3. E2EE key derived from room ID + PIN via HKDF — never exchanged over the wire, fixed for the call duration
-4. Safety numbers let both parties verify the connection isn't intercepted
+1. Native WebRTC with encrypted WebSocket signaling (AES-256-GCM, keys derived from a slow-stretched 3-word phrase)
+2. Only a derived room tag is sent to the signaling server; the raw phrase stays client-side
+3. Media is forced through your coturn TURN relay (peers never see each other's IP)
+4. Safety numbers let both parties verify the connection isn't actively intercepted
 
 ## Quick Start
 
@@ -78,7 +80,7 @@ bun install
 bun run dev
 ```
 
-Open `http://localhost:4321` in two browser tabs. Click the orb. Share the link. Call connects.
+Open `http://localhost:4321` in two browser tabs. Click the orb. Share the 3-word phrase or the fragment URL. Call connects.
 
 ## Tech Stack
 
@@ -99,9 +101,9 @@ Open `http://localhost:4321` in two browser tabs. Click the orb. Share the link.
 src/
   pages/index.astro       Single-page app (all UI states)
   lib/call.ts             WebRTC call logic, encrypted signaling, orb reactivity, controls
-  lib/crypto.ts           Verification codes, base64 utils
+  lib/crypto.ts           Phrase stretching, room tag derivation, verification codes
   lib/e2ee-worker.ts      SFrame (RFC 9605) frame encryption
-  lib/room-id.ts          Word-based room IDs
+  lib/room-phrase.ts      3-word phrase generation, parsing, normalization
   styles/global.css       Tailwind theme, orb animations
 server/
   index.ts                WebSocket signaling server (ws) + HMAC TURN credentials API
