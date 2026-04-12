@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import express from 'express';
 import { createServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -59,36 +59,59 @@ app.get('/api/turn-credentials', (req, res) => {
 
 // --- WebSocket signaling relay ---
 
-const rooms = new Map<string, Set<WebSocket>>();
+type RoomState = {
+  joinProof: string;
+  peers: Set<WebSocket>;
+};
+
+const rooms = new Map<string, RoomState>();
 const MAX_PEERS = 2;
+
+function normalizeAdmissionProof(proof: string): string {
+  return createHash('sha256')
+    .update(proof)
+    .digest('hex');
+}
 
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   const roomId = url.searchParams.get('room');
+  const joinProof = url.searchParams.get('proof');
 
   if (!roomId) {
     ws.close(4000, 'Missing room parameter');
     return;
   }
 
-  // Get or create room
-  let room = rooms.get(roomId);
-  if (!room) {
-    room = new Set();
-    rooms.set(roomId, room);
+  if (!joinProof) {
+    ws.close(4002, 'Missing room proof');
+    return;
   }
 
-  if (room.size >= MAX_PEERS) {
+  // Get or create room
+  let roomState = rooms.get(roomId);
+  if (!roomState) {
+    roomState = {
+      joinProof: normalizeAdmissionProof(joinProof),
+      peers: new Set(),
+    };
+    rooms.set(roomId, roomState);
+  } else if (roomState.joinProof !== normalizeAdmissionProof(joinProof)) {
+    ws.close(4003, 'Invalid room secret');
+    return;
+  }
+
+  if (roomState.peers.size >= MAX_PEERS) {
     ws.close(4001, 'Room full');
     return;
   }
 
-  room.add(ws);
+  roomState.peers.add(ws);
 
   // Notify existing peers (unencrypted control message)
-  for (const peer of room) {
+  for (const peer of roomState.peers) {
     if (peer !== ws && peer.readyState === WebSocket.OPEN) {
       peer.send(JSON.stringify({ type: 'peer-joined' }));
     }
@@ -97,7 +120,7 @@ wss.on('connection', (ws, req) => {
   // Relay messages (server sees only encrypted blobs)
   ws.on('message', (data) => {
     const msg = data.toString();
-    for (const peer of room!) {
+    for (const peer of roomState!.peers) {
       if (peer !== ws && peer.readyState === WebSocket.OPEN) {
         peer.send(msg);
       }
@@ -105,17 +128,17 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    room!.delete(ws);
+    roomState!.peers.delete(ws);
 
     // Notify remaining peers
-    for (const peer of room!) {
+    for (const peer of roomState!.peers) {
       if (peer.readyState === WebSocket.OPEN) {
         peer.send(JSON.stringify({ type: 'peer-left' }));
       }
     }
 
     // Clean up empty rooms
-    if (room!.size === 0) {
+    if (roomState!.peers.size === 0) {
       rooms.delete(roomId);
     }
   });

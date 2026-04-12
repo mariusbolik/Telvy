@@ -20,6 +20,10 @@ export function base64ToArrayBuffer(str: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+function arrayBufferToHex(buf: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buf), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 // --- HKDF key derivation ---
 
 function composeSecretMaterial(roomId: string, shareSecret: string, pin?: string): string {
@@ -76,6 +80,18 @@ export function deriveCallKey(
     'telvy-call-v1',
     'e2ee-media',
   );
+}
+
+export async function deriveAdmissionProof(
+  roomId: string,
+  shareSecret: string,
+  pin?: string,
+): Promise<string> {
+  const payload = new TextEncoder().encode(
+    composeSecretMaterial(roomId, shareSecret, pin) + '|telvy-admission-v1',
+  );
+  const digest = await crypto.subtle.digest('SHA-256', payload);
+  return arrayBufferToHex(digest);
 }
 
 // --- Encrypted signaling ---

@@ -1,4 +1,5 @@
 import {
+  deriveAdmissionProof,
   deriveSignalingKey,
   deriveCallKey,
   encryptSignaling,
@@ -163,6 +164,7 @@ export async function initCall(
   }
 
   // 3. Derive keys from the public room ID plus the secret share link fragment.
+  const joinProof = await deriveAdmissionProof(roomId, shareSecret, pin);
   const sigKey = await deriveSignalingKey(roomId, shareSecret, pin);
   const callKey = await deriveCallKey(roomId, shareSecret, pin);
   const callKeyRaw = await crypto.subtle.exportKey('raw', callKey);
@@ -267,7 +269,10 @@ export async function initCall(
 
   // 6. Connect WebSocket
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/ws?room=${encodeURIComponent(roomId)}`);
+  const joinUrl = new URL(`${proto}//${location.host}/ws`);
+  joinUrl.searchParams.set('room', roomId);
+  joinUrl.searchParams.set('proof', joinProof);
+  ws = new WebSocket(joinUrl);
 
   ws.onopen = () => setState('waiting');
   ws.onerror = () => {
