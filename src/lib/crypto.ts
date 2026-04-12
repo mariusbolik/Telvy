@@ -22,6 +22,10 @@ export function base64ToArrayBuffer(str: string): ArrayBuffer {
 
 // --- HKDF key derivation ---
 
+function composeSecretMaterial(roomId: string, shareSecret: string, pin?: string): string {
+  return JSON.stringify({ roomId, shareSecret, pin: pin || '' });
+}
+
 async function deriveKey(
   input: string,
   salt: string,
@@ -48,14 +52,30 @@ async function deriveKey(
   );
 }
 
-// Derive signaling encryption key from room ID + optional PIN
-export function deriveSignalingKey(roomId: string, pin?: string): Promise<CryptoKey> {
-  return deriveKey(roomId + (pin || ''), 'telvy-signaling-v1', 'signaling');
+// Derive signaling encryption key from the public room ID plus the secret link fragment.
+export function deriveSignalingKey(
+  roomId: string,
+  shareSecret: string,
+  pin?: string,
+): Promise<CryptoKey> {
+  return deriveKey(
+    composeSecretMaterial(roomId, shareSecret, pin),
+    'telvy-signaling-v1',
+    'signaling',
+  );
 }
 
-// Derive E2EE media key from room ID + optional PIN
-export function deriveCallKey(roomId: string, pin?: string): Promise<CryptoKey> {
-  return deriveKey(roomId + (pin || ''), 'telvy-call-v1', 'e2ee-media');
+// Derive E2EE media key from the public room ID plus the secret link fragment.
+export function deriveCallKey(
+  roomId: string,
+  shareSecret: string,
+  pin?: string,
+): Promise<CryptoKey> {
+  return deriveKey(
+    composeSecretMaterial(roomId, shareSecret, pin),
+    'telvy-call-v1',
+    'e2ee-media',
+  );
 }
 
 // --- Encrypted signaling ---

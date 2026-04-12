@@ -110,7 +110,11 @@ function applyE2ee(pc: RTCPeerConnection, keyRaw: ArrayBuffer) {
 
 // --- Main ---
 
-export async function initCall(roomId: string, pin?: string): Promise<void> {
+export async function initCall(
+  roomId: string,
+  shareSecret: string,
+  pin?: string,
+): Promise<void> {
   let pc: RTCPeerConnection | null = null;
   let ws: WebSocket | null = null;
   let localStream: MediaStream | null = null;
@@ -158,9 +162,9 @@ export async function initCall(roomId: string, pin?: string): Promise<void> {
     return;
   }
 
-  // 3. Derive keys from room ID + PIN (no key exchange needed)
-  const sigKey = await deriveSignalingKey(roomId, pin);
-  const callKey = await deriveCallKey(roomId, pin);
+  // 3. Derive keys from the public room ID plus the secret share link fragment.
+  const sigKey = await deriveSignalingKey(roomId, shareSecret, pin);
+  const callKey = await deriveCallKey(roomId, shareSecret, pin);
   const callKeyRaw = await crypto.subtle.exportKey('raw', callKey);
 
   // 4. Encrypted signaling helpers

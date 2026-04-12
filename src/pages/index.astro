@@ -144,7 +144,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Encrypted signaling</strong> — Connection setup messages are encrypted client-side before reaching any server. Derived via HKDF-SHA256, only someone with your room link can read them.</span>
+              <span><strong class="text-gray-700">Encrypted signaling</strong> — Connection setup messages are encrypted client-side before reaching any server. Keys are derived from a random secret embedded in the share link fragment, which browsers do not send in HTTP requests.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
@@ -170,14 +170,20 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
   <script>
     import { initCall } from '../lib/call';
+    import { buildShareUrl, generateShareSecret, parseCallUrl } from '../lib/call-link';
     import { generateRoomId } from '../lib/room-id';
 
     const app = document.getElementById('app')!;
     const orbButton = document.getElementById('orb-button')!;
-    // If URL has ?room=, auto-join
-    const urlRoom = new URLSearchParams(location.search).get('room');
-    if (urlRoom) {
-      startCall(urlRoom);
+    const initialUrl = new URL(location.href);
+    const initialRoom = initialUrl.searchParams.get('room');
+    const initialCall = parseCallUrl(initialUrl);
+
+    // If URL has room material, auto-join only with a complete secure link.
+    if (initialCall) {
+      startCall(initialCall.roomId, initialCall.shareSecret);
+    } else if (initialRoom) {
+      showJoinError(initialRoom, 'This call link is incomplete or invalid.');
     }
 
     // Orb click — start a new call
@@ -185,8 +191,9 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       const state = app.dataset.state;
       if (state === 'idle') {
         const roomId = generateRoomId();
-        history.pushState(null, '', `?room=${roomId}`);
-        startCall(roomId);
+        const shareSecret = generateShareSecret();
+        history.pushState(null, '', buildShareUrl(location.origin, roomId, shareSecret));
+        startCall(roomId, shareSecret);
       }
     });
 
@@ -196,16 +203,29 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       resetToLanding();
     });
 
-    function startCall(roomId: string) {
+    function startCall(roomId: string, shareSecret: string) {
       const pin = (document.getElementById('room-pin') as HTMLInputElement)?.value || undefined;
+      const shareUrl = buildShareUrl(location.origin, roomId, shareSecret);
       document.getElementById('room-id')!.textContent = roomId;
-      document.getElementById('share-url')!.textContent = `${location.origin}/?room=${roomId}`;
+      document.getElementById('share-url')!.textContent = shareUrl;
       document.getElementById('room-display')!.classList.remove('hidden');
       document.getElementById('share-section')!.classList.remove('hidden');
       document.getElementById('controls')!.classList.remove('hidden');
       document.getElementById('landing-cta')!.classList.add('hidden');
       document.getElementById('ended-section')!.classList.add('hidden');
-      initCall(roomId, pin);
+      initCall(roomId, shareSecret, pin);
+    }
+
+    function showJoinError(roomId: string, message: string) {
+      app.dataset.state = 'disconnected';
+      document.getElementById('room-id')!.textContent = roomId;
+      document.getElementById('room-display')!.classList.remove('hidden');
+      document.getElementById('status-dot')!.className = 'status-dot disconnected';
+      document.getElementById('status-text')!.textContent = message;
+      document.getElementById('share-section')!.classList.add('hidden');
+      document.getElementById('controls')!.classList.add('hidden');
+      document.getElementById('landing-cta')!.classList.add('hidden');
+      document.getElementById('ended-section')!.classList.remove('hidden');
     }
 
     function resetToLanding() {
@@ -221,9 +241,13 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
     // Handle back/forward navigation
     window.addEventListener('popstate', () => {
-      const room = new URLSearchParams(location.search).get('room');
-      if (room) {
-        startCall(room);
+      const nextUrl = new URL(location.href);
+      const nextRoom = nextUrl.searchParams.get('room');
+      const nextCall = parseCallUrl(nextUrl);
+      if (nextCall) {
+        startCall(nextCall.roomId, nextCall.shareSecret);
+      } else if (nextRoom) {
+        showJoinError(nextRoom, 'This call link is incomplete or invalid.');
       } else {
         resetToLanding();
       }
