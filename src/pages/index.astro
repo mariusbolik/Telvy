@@ -39,7 +39,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
       <div id="phrase-section" class="mt-4 w-full max-w-sm animate-fade-in">
         <form id="phrase-form" class="flex items-center gap-2">
-          <input id="room-phrase-input" type="text" placeholder="Or enter a 3-word phrase" autocomplete="off"
+          <input id="room-phrase-input" type="text" placeholder="Or enter the 3-word phrase" autocomplete="off"
             class="flex-1 text-center text-sm bg-gray-50 rounded-lg px-4 py-2 border border-gray-200 focus:outline-none focus:border-primary/50 transition-colors" />
           <button id="join-call-btn" type="submit"
             class="px-4 py-2 text-sm font-medium bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors">
@@ -133,11 +133,11 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">3 words only</strong> — The phrase is the only thing users need to share. Telvy derives a separate room tag from it so the raw phrase is never sent to the signaling server.</span>
+              <span><strong class="text-gray-700">3 words only</strong> — The phrase is the only thing users need to share. New calls use 3 words drawn from a local curated 7,776-word list, so the UX stays simple while the invite space gets much larger.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
-              <span><strong class="text-gray-700">Slow key stretching</strong> — The 3-word phrase is expanded client-side with a slow PBKDF2 step before signaling and media keys are derived. That raises the cost of brute-forcing short phrases.</span>
+              <span><strong class="text-gray-700">Memory-hard derivation</strong> — The 3-word phrase is expanded client-side with Argon2id before room tags, signaling keys, and media keys are derived. That raises the cost of brute-forcing short phrases without adding another user step.</span>
             </li>
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
@@ -167,6 +167,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       buildShareUrl,
       formatRoomPhrase,
       generateRoomPhrase,
+      getRoomPhraseErrorMessage,
       parseCallUrl,
       parseRoomPhraseInput,
     } from '../lib/room-phrase';
@@ -192,10 +193,10 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
     const initialUrl = new URL(location.href);
     const initialPhrase = parseCallUrl(initialUrl);
 
-    if (initialPhrase) {
-      startCall(initialPhrase);
+    if (initialPhrase.roomPhrase) {
+      startCall(initialPhrase.roomPhrase);
     } else if (initialUrl.hash) {
-      showJoinError('This call phrase is invalid.');
+      showJoinError(getRoomPhraseErrorMessage(initialPhrase.error));
     }
 
     orbButton.addEventListener('click', () => {
@@ -209,14 +210,14 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
     document.getElementById('phrase-form')?.addEventListener('submit', (event) => {
       event.preventDefault();
 
-      const roomPhrase = parseRoomPhraseInput(phraseInput?.value || '', location.origin);
-      if (!roomPhrase) {
-        setPhraseError('Enter the same 3-word phrase you were given.');
+      const parsedPhrase = parseRoomPhraseInput(phraseInput?.value || '', location.origin);
+      if (!parsedPhrase.roomPhrase) {
+        setPhraseError(getRoomPhraseErrorMessage(parsedPhrase.error));
         return;
       }
 
-      history.pushState(null, '', buildShareUrl(location.origin, roomPhrase));
-      startCall(roomPhrase);
+      history.pushState(null, '', buildShareUrl(location.origin, parsedPhrase.roomPhrase));
+      startCall(parsedPhrase.roomPhrase);
     });
 
     document.getElementById('new-call-btn')?.addEventListener('click', () => {

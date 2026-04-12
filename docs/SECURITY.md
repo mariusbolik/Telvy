@@ -2,13 +2,13 @@
 
 Telvy is optimized for one goal: the simplest possible 1:1 call flow that still keeps the raw secret client-side.
 
-The user-facing invite is exactly one 3-word phrase. That phrase is never sent to the server directly. Instead, the browser stretches it locally with a slow PBKDF2 step and derives:
+The user-facing invite is exactly one 3-word phrase. That phrase is never sent to the server directly. Instead, the browser stretches it locally with Argon2id and derives:
 
 - a `roomTag` used for rendezvous on the signaling server
 - an AES-GCM signaling key
 - an AES-GCM media key used by the SFrame worker
 
-This keeps the UX extremely simple, but it also creates an unavoidable tradeoff: three ordinary words do not carry the same entropy as a long random token. Telvy raises the cost of brute-force by stretching the phrase client-side, but for sensitive calls users should still compare the safety number after connecting.
+This keeps the UX extremely simple, but it also creates an unavoidable tradeoff: three ordinary words do not carry the same entropy as a long random token. Telvy now uses a much larger 7,776-word curated list plus a memory-hard KDF to raise the brute-force cost materially, but for sensitive calls users should still compare the safety number after connecting.
 
 ## Threat Model
 
@@ -30,14 +30,16 @@ This keeps the UX extremely simple, but it also creates an unavoidable tradeoff:
 ## Invite and Key Derivation
 
 ### 3-word phrase
-- A new call generates a phrase like `brave-azure-dolphin`
-- The share URL is `/#brave-azure-dolphin`
+- A new call generates a phrase like `badge-ladder-orbit`
+- The share URL is `/#badge-ladder-orbit`
 - The browser does not send the fragment to the server in HTTP requests
 - Users can also join by manually typing the same phrase
+- New phrases are drawn from a local vendored EFF long wordlist with 7,776 curated words
+- Generated phrases never repeat a word
 
-### Slow phrase stretching
-- Telvy runs PBKDF2-SHA256 client-side with a fixed app salt
-- The current iteration count is deliberately high to make offline guessing expensive
+### Memory-hard phrase stretching
+- Telvy runs Argon2id client-side with a fixed app salt
+- Default parameters are `memorySize = 32768`, `passes = 3`, `parallelism = 1`
 - Stretching happens once at call start, then HKDF expands the stretched secret into purpose-specific material
 
 ### Derived values
@@ -75,7 +77,7 @@ The safety number is derived from the DTLS fingerprints in local and remote SDP:
 
 Matching codes confirm that the DTLS handshake was not actively intercepted. For sensitive calls, users should compare the displayed code aloud before talking.
 
-Important: safety numbers detect active interception. They do not make a weak invite phrase high-entropy. That is why Telvy also uses slow phrase stretching and keeps the raw phrase out of server-visible URLs.
+Important: safety numbers detect active interception. They do not make a weak invite phrase high-entropy. That is why Telvy also uses a larger curated wordlist, memory-hard phrase stretching, and keeps the raw phrase out of server-visible URLs.
 
 ## Signaling Server Privacy
 

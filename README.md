@@ -37,7 +37,8 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 
 - **3 words only** — Share one human phrase, no accounts and no hidden invite secret
 - **E2E encrypted** — Two encryption layers: WebRTC DTLS-SRTP + SFrame (RFC 9605) frame encryption
-- **Slow phrase stretching** — The phrase is expanded client-side before signaling and media keys are derived
+- **Stronger 3-word invites** — New calls use 3 words drawn from a curated 7,776-word list instead of a tiny adjective-color-animal pool
+- **Memory-hard phrase stretching** — The phrase is expanded client-side with Argon2id before signaling and media keys are derived
 - **No third-party media servers** — All traffic is relayed through your own TURN server
 - **Zero third-party requests** — No Google STUN, no CDN, no analytics, no external fonts
 - **Swiss hosted** — Self-host on a Swiss VPS for strongest privacy jurisdiction
@@ -49,7 +50,7 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 | Encryption | DTLS-SRTP + AES-256-GCM (double layer) |
 | IP privacy | Forced TURN relay, peers never learn each other's IP |
 | TURN auth | HMAC-SHA1 credentials, 1-hour TTL, rate-limited |
-| Signaling | Encrypted WebSocket (AES-256-GCM, key derived from a stretched 3-word phrase) |
+| Signaling | Encrypted WebSocket (AES-256-GCM, key derived from an Argon2id-stretched 3-word phrase) |
 | Session key | E2EE key fixed for call duration, derived from the same stretched phrase |
 | Invite | One 3-word phrase, optionally shared as a fragment URL |
 | Verification | Safety numbers from DTLS fingerprints |
@@ -60,13 +61,13 @@ Every mainstream calling app — Zoom, Google Meet, Teams, even Jitsi — routes
 ## How It Works
 
 ```
-You click "Start Call" → get 3 words like brave-azure-dolphin
+You click "Start Call" → get 3 words like badge-ladder-orbit
 Share the phrase or the fragment URL → other person opens it or types it → call connects automatically
 Audio by default. Video optional. One click to end.
 ```
 
 Under the hood:
-1. Native WebRTC with encrypted WebSocket signaling (AES-256-GCM, keys derived from a slow-stretched 3-word phrase)
+1. Native WebRTC with encrypted WebSocket signaling (AES-256-GCM, keys derived from an Argon2id-stretched 3-word phrase)
 2. Only a derived room tag is sent to the signaling server; the raw phrase stays client-side
 3. Media is forced through your coturn TURN relay (peers never see each other's IP)
 4. Safety numbers let both parties verify the connection isn't actively intercepted
@@ -101,9 +102,10 @@ Open `http://localhost:4321` in two browser tabs. Click the orb. Share the 3-wor
 src/
   pages/index.astro       Single-page app (all UI states)
   lib/call.ts             WebRTC call logic, encrypted signaling, orb reactivity, controls
-  lib/crypto.ts           Phrase stretching, room tag derivation, verification codes
+  lib/crypto.ts           Argon2id phrase stretching, room tag derivation, verification codes
   lib/e2ee-worker.ts      SFrame (RFC 9605) frame encryption
   lib/room-phrase.ts      3-word phrase generation, parsing, normalization
+  lib/vendor/eff-long-wordlist.txt  Vendored EFF 7,776-word invite list
   styles/global.css       Tailwind theme, orb animations
 server/
   index.ts                WebSocket signaling server (ws) + HMAC TURN credentials API
@@ -167,4 +169,4 @@ MIT
 
 ---
 
-**Keywords:** WebRTC, peer-to-peer, P2P, encrypted calls, E2EE, end-to-end encryption, private video calls, secure audio calls, self-hosted, open source, no tracking, no logs, Swiss hosting, TURN relay, coturn, Astro, Bun, privacy-first, Signal alternative, Zoom alternative, encrypted signaling, HKDF
+**Keywords:** WebRTC, peer-to-peer, P2P, encrypted calls, E2EE, end-to-end encryption, private video calls, secure audio calls, self-hosted, open source, no tracking, no logs, Swiss hosting, TURN relay, coturn, Astro, Bun, privacy-first, Signal alternative, Zoom alternative, encrypted signaling, Argon2id

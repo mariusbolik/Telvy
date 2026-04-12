@@ -27,7 +27,7 @@ Yes. `iceTransportPolicy: 'relay'` forces audio and video through coturn so peer
 Not directly. Telvy puts the phrase in the URL fragment (`/#phrase`) or accepts it through the local join input. The browser does not send the fragment in HTTP requests, and WebSocket joins use only a derived `roomTag`.
 
 ### If the server does not see the raw phrase, why do we still need safety numbers?
-Because three ordinary words are still a relatively small secret space. Telvy stretches the phrase client-side with a slow PBKDF2 step to raise the cost of brute-force, but a powerful malicious server could still try to recover short phrases from the derived `roomTag`. Safety numbers detect active interception and should be compared on sensitive calls.
+Because three ordinary words are still a relatively small secret space. Telvy now generates those words from a curated 7,776-word list and stretches the phrase client-side with Argon2id to raise the cost of brute-force, but a powerful malicious server could still try to recover short phrases from the derived `roomTag`. Safety numbers detect active interception and should be compared on sensitive calls.
 
 ### Can the server decrypt call content?
 Not passively without extra work. Telvy never sends the raw phrase to the server, and signaling/media keys are derived client-side. But because the invite is only three words, a malicious server with enough compute could attempt to brute-force the stretched phrase-derived material. Telvy raises that cost; it does not eliminate it.
@@ -41,8 +41,11 @@ The browser stretches the phrase locally, derives a deterministic `roomTag`, and
 ### Why exactly three words?
 It is the simplest share model Telvy can offer. The product intentionally favors memorability and verbal sharing over longer random invite tokens.
 
-### Why use slow phrase stretching?
-Without it, the derived `roomTag` would be much cheaper to brute-force. Telvy runs PBKDF2-SHA256 with a high iteration count once at call start, then expands that stretched secret into signaling and media keys.
+### Why use a curated word list?
+The old adjective-color-animal pool was too small. Telvy now draws each phrase from a local 7,776-word curated list, which keeps the invite verbal and memorable while making the phrase space much larger.
+
+### Why use memory-hard phrase stretching?
+Without it, the derived `roomTag` would be much cheaper to brute-force. Telvy runs Argon2id once at call start, then expands that stretched secret into signaling and media keys.
 
 ### What are safety numbers?
 A 6-digit code derived from both peers' DTLS fingerprints. If both people see the same code, the DTLS handshake was not actively replaced in transit.

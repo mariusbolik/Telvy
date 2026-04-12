@@ -1,9 +1,21 @@
-// Cryptographic utilities — Web Crypto API only, zero external dependencies.
+// Cryptographic utilities — Web Crypto API plus a local Argon2id Wasm module.
+
+import { loadArgon2id, type computeHash } from './argon2id';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const MASTER_KEY_SALT = 'telvy-master-v1';
-const MASTER_KEY_ITERATIONS = 750_000;
+const MASTER_KEY_SALT = textEncoder.encode('telvy-master-v2');
+const ROOM_TAG_SALT = textEncoder.encode('telvy-room-tag-v2');
+const SIGNALING_SALT = textEncoder.encode('telvy-signaling-v2');
+const CALL_KEY_SALT = textEncoder.encode('telvy-call-v2');
+const ROOM_TAG_INFO = textEncoder.encode('room-tag');
+const SIGNALING_INFO = textEncoder.encode('signaling');
+const CALL_KEY_INFO = textEncoder.encode('e2ee-media');
+const ARGON2ID_MEMORY_SIZE = 2 ** 15;
+const ARGON2ID_PASSES = 3;
+const ARGON2ID_PARALLELISM = 1;
+const ARGON2ID_TAG_LENGTH = 32;
+let argon2idLoader: Promise<computeHash> | null = null;
 
 // --- Base64 ---
 
@@ -31,46 +43,52 @@ function arrayBufferToHex(buf: ArrayBuffer): string {
 
 // --- Slow phrase derivation ---
 
+async function getArgon2id(): Promise<computeHash> {
+  argon2idLoader ??= loadArgon2id();
+  return argon2idLoader;
+}
+
 async function deriveMasterKey(roomPhrase: string): Promise<CryptoKey> {
-  const phraseKey = await crypto.subtle.importKey(
-    'raw',
-    textEncoder.encode(roomPhrase),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
-  );
+  const argon2id = await getArgon2id();
+  const password = textEncoder.encode(roomPhrase);
 
-  const masterSecret = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      hash: 'SHA-256',
-      salt: textEncoder.encode(MASTER_KEY_SALT),
-      iterations: MASTER_KEY_ITERATIONS,
-    },
-    phraseKey,
-    256,
-  );
+  try {
+    const masterSecret = argon2id({
+      password,
+      salt: MASTER_KEY_SALT,
+      parallelism: ARGON2ID_PARALLELISM,
+      passes: ARGON2ID_PASSES,
+      memorySize: ARGON2ID_MEMORY_SIZE,
+      tagLength: ARGON2ID_TAG_LENGTH,
+    });
 
-  return crypto.subtle.importKey(
-    'raw',
-    masterSecret,
-    'HKDF',
-    false,
-    ['deriveBits', 'deriveKey'],
-  );
+    try {
+      return await crypto.subtle.importKey(
+        'raw',
+        masterSecret,
+        'HKDF',
+        false,
+        ['deriveBits', 'deriveKey'],
+      );
+    } finally {
+      masterSecret.fill(0);
+    }
+  } finally {
+    password.fill(0);
+  }
 }
 
 async function deriveAesKey(
   masterKey: CryptoKey,
-  salt: string,
-  info: string,
+  salt: BufferSource,
+  info: BufferSource,
 ): Promise<CryptoKey> {
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: textEncoder.encode(salt),
-      info: textEncoder.encode(info),
+      salt,
+      info,
     },
     masterKey,
     { name: 'AES-GCM', length: 256 },
@@ -84,8 +102,8 @@ async function deriveRoomTag(masterKey: CryptoKey): Promise<string> {
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: textEncoder.encode('telvy-room-tag-v1'),
-      info: textEncoder.encode('room-tag'),
+      salt: ROOM_TAG_SALT,
+      info: ROOM_TAG_INFO,
     },
     masterKey,
     256,
@@ -102,8 +120,8 @@ export async function deriveCallSecrets(roomPhrase: string): Promise<{
   const masterKey = await deriveMasterKey(roomPhrase);
   const [roomTag, signalingKey, callKey] = await Promise.all([
     deriveRoomTag(masterKey),
-    deriveAesKey(masterKey, 'telvy-signaling-v1', 'signaling'),
-    deriveAesKey(masterKey, 'telvy-call-v1', 'e2ee-media'),
+    deriveAesKey(masterKey, SIGNALING_SALT, SIGNALING_INFO),
+    deriveAesKey(masterKey, CALL_KEY_SALT, CALL_KEY_INFO),
   ]);
 
   return { roomTag, signalingKey, callKey };
