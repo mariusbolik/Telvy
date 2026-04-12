@@ -35,7 +35,6 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
           <div id="call-media-shell" class="call-media-shell">
             <div id="call-media-placeholder" class="call-media-placeholder" aria-hidden="true">
               <span id="stage-mic-icon" class="call-media-icon"><Mic class="w-12 h-12 sm:w-14 sm:h-14" /></span>
-              <span id="stage-video-icon" class="call-media-icon hidden"><Video class="w-12 h-12 sm:w-14 sm:h-14" /></span>
             </div>
             <video id="remote-video" autoplay playsinline class="call-media-video hidden" aria-label="Remote video"></video>
           </div>
@@ -126,7 +125,13 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       aria-label="Open technical details"
       title="Technical details"
     >
-      <Shield class="w-5 h-5" />
+      <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" aria-hidden="true">
+        <title>secure</title>
+        <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
+          <path stroke="#344054" d="m18.75 22.917l4.167 4.166l8.333-8.333" />
+          <path stroke="#10b981" d="m25 43.75l1.833-.792a22.92 22.92 0 0 0 13.813-19.291l.896-11.5a2.08 2.08 0 0 0-1.584-2.084L25 6.25L10.042 10a2.08 2.08 0 0 0-1.584 2.083l.896 11.5a22.92 22.92 0 0 0 13.813 19.292z" />
+        </g>
+      </svg>
     </button>
 
     <div

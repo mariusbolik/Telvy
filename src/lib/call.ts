@@ -321,8 +321,6 @@ export async function initCall(roomPhrase: string): Promise<void> {
     const stage = document.getElementById('call-media-stage');
     const remoteVideo = document.getElementById('remote-video');
     const localPreview = document.getElementById('local-preview-shell');
-    const micIcon = document.getElementById('stage-mic-icon');
-    const videoIcon = document.getElementById('stage-video-icon');
 
     const videoMode = videoEnabled || remoteVideoActive;
 
@@ -333,8 +331,6 @@ export async function initCall(roomPhrase: string): Promise<void> {
 
     remoteVideo?.classList.toggle('hidden', !remoteVideoActive);
     localPreview?.classList.toggle('hidden', !videoEnabled);
-    micIcon?.classList.toggle('hidden', videoMode);
-    videoIcon?.classList.toggle('hidden', !videoMode);
   }
 
   function updateVerificationState() {

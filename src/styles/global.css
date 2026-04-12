@@ -181,6 +181,7 @@
   color: white;
   pointer-events: none;
   z-index: 2;
+  transition: opacity 180ms ease;
 }
 
 .call-media-icon {
@@ -197,6 +198,10 @@
   height: 100%;
   object-fit: cover;
   z-index: 1;
+}
+
+.call-media-stage[data-remote-video="true"] .call-media-placeholder {
+  opacity: 0;
 }
 
 .local-preview-shell {
