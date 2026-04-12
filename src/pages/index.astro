@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircle } from '@lucide/astro';
+import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircle, X } from '@lucide/astro';
 ---
 
 <Layout title="Telvy">
@@ -119,16 +119,45 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
     </div>
 
-    <section class="px-4 pb-8 max-w-2xl mx-auto w-full animate-fade-in sm:px-6" style="animation-delay: 0.3s">
-      <details class="rounded-xl border border-gray-200 group">
-        <summary class="p-5 cursor-pointer flex items-center justify-between hover:bg-gray-50 rounded-xl transition-colors">
+    <button
+      id="technical-details-fab"
+      type="button"
+      class="technical-details-fab"
+      aria-label="Open technical details"
+      title="Technical details"
+    >
+      <Shield class="w-5 h-5" />
+    </button>
+
+    <div
+      id="technical-details-modal"
+      class="technical-details-modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="technical-details-title"
+    >
+      <div class="technical-details-panel">
+        <div class="technical-details-header">
           <div class="flex items-center gap-3">
-            <Shield class="w-5 h-5 text-gray-400" />
-            <span class="font-semibold text-gray-700">Technical details</span>
+            <span class="technical-details-icon">
+              <Shield class="w-5 h-5" />
+            </span>
+            <div>
+              <p id="technical-details-title" class="text-lg font-semibold text-gray-900">Technical details</p>
+              <p class="mt-1 text-sm text-gray-500">What Telvy does to keep calls private and simple.</p>
+            </div>
           </div>
-          <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-        </summary>
-        <div class="px-5 pb-5 border-t border-gray-100 pt-4">
+          <button
+            id="technical-details-close"
+            type="button"
+            class="technical-details-close"
+            aria-label="Close technical details"
+          >
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <div class="technical-details-body">
           <ul class="space-y-3 text-sm text-gray-500">
             <li class="flex items-start gap-2">
               <CheckCircle class="w-4 h-4 text-secure shrink-0 mt-0.5" />
@@ -160,8 +189,8 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
             </li>
           </ul>
         </div>
-      </details>
-    </section>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -180,6 +209,26 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
     const callMediaStage = document.getElementById('call-media-stage');
     const phraseInput = document.getElementById('room-phrase-input') as HTMLInputElement | null;
     const phraseError = document.getElementById('phrase-error');
+    const technicalDetailsFab = document.getElementById('technical-details-fab') as HTMLButtonElement | null;
+    const technicalDetailsModal = document.getElementById('technical-details-modal');
+    const technicalDetailsClose = document.getElementById('technical-details-close') as HTMLButtonElement | null;
+    let lastFocusedElement: HTMLElement | null = null;
+
+    function setTechnicalDetailsOpen(open: boolean) {
+      if (!technicalDetailsModal) return;
+
+      if (open) {
+        lastFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        technicalDetailsModal.classList.remove('hidden');
+        document.documentElement.style.overflow = 'hidden';
+        requestAnimationFrame(() => technicalDetailsClose?.focus());
+        return;
+      }
+
+      technicalDetailsModal.classList.add('hidden');
+      document.documentElement.style.removeProperty('overflow');
+      lastFocusedElement?.focus();
+    }
 
     function setPhraseError(message: string) {
       if (!phraseError) return;
@@ -227,6 +276,26 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
     document.getElementById('new-call-btn')?.addEventListener('click', () => {
       history.pushState(null, '', '/');
       resetToLanding();
+    });
+
+    technicalDetailsFab?.addEventListener('click', () => {
+      setTechnicalDetailsOpen(true);
+    });
+
+    technicalDetailsClose?.addEventListener('click', () => {
+      setTechnicalDetailsOpen(false);
+    });
+
+    technicalDetailsModal?.addEventListener('click', (event) => {
+      if (event.target === technicalDetailsModal) {
+        setTechnicalDetailsOpen(false);
+      }
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && technicalDetailsModal && !technicalDetailsModal.classList.contains('hidden')) {
+        setTechnicalDetailsOpen(false);
+      }
     });
 
     function startCall(roomPhrase: string) {
