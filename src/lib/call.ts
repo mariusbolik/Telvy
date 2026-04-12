@@ -38,6 +38,7 @@ function isServerFrame(msg: unknown): msg is ServerFrame {
 
 const supportsE2EE =
   typeof window !== 'undefined' && 'RTCRtpScriptTransform' in window;
+let activeSessionTeardown: ((silent?: boolean) => void) | null = null;
 
 type AppState = 'idle' | 'requesting-media' | 'connecting' | 'waiting' | 'connected' | 'disconnected';
 
@@ -68,6 +69,23 @@ function setState(state: AppState) {
   }
 }
 
+function setStatusText(message: string) {
+  const statusText = document.getElementById('status-text');
+  if (statusText) statusText.textContent = message;
+}
+
+function setMicToggleState(enabled: boolean) {
+  document.getElementById('toggle-mic')?.classList.toggle('control-off', !enabled);
+  document.getElementById('mic-on')?.classList.toggle('hidden', !enabled);
+  document.getElementById('mic-off')?.classList.toggle('hidden', enabled);
+}
+
+function setVideoToggleState(enabled: boolean) {
+  document.getElementById('toggle-video')?.classList.toggle('control-off', !enabled);
+  document.getElementById('vid-on')?.classList.toggle('hidden', !enabled);
+  document.getElementById('vid-off')?.classList.toggle('hidden', enabled);
+}
+
 function showVerificationCode(code: string) {
   const el = document.getElementById('verification-code');
   if (el) { el.textContent = code; el.classList.remove('hidden'); }
@@ -79,7 +97,7 @@ function showE2eeBadge(active: boolean) {
   if (badge) {
     badge.classList.remove('hidden');
     if (status) status.textContent = active ? 'E2EE' : 'E2EE unavailable';
-    if (!active) badge.style.opacity = '0.5';
+    badge.style.opacity = active ? '1' : '0.5';
   }
 }
 
@@ -134,13 +152,226 @@ export async function initCall(
   shareSecret: string,
   pin?: string,
 ): Promise<void> {
+  activeSessionTeardown?.(true);
+
   let pc: RTCPeerConnection | null = null;
   let ws: WebSocket | null = null;
   let localStream: MediaStream | null = null;
   let stopOrb: (() => void) | null = null;
   let remoteStream: MediaStream | null = null;
-  let videoEnabled = false;
   let pendingCandidates: RTCIceCandidateInit[] = [];
+  let videoEnabled = false;
+  let sessionEnded = false;
+  let callKeyRaw: ArrayBuffer | null = null;
+
+  function updateVideoSectionVisibility() {
+    const hasRemoteVideo = Boolean(remoteStream?.getVideoTracks().length);
+    document.getElementById('video-section')?.classList.toggle('hidden', !videoEnabled && !hasRemoteVideo);
+  }
+
+  function clearRemoteMedia() {
+    remoteStream = null;
+    const audio = document.getElementById('remote-audio') as HTMLAudioElement | null;
+    if (audio) audio.srcObject = null;
+    const remoteVideo = document.getElementById('remote-video') as HTMLVideoElement | null;
+    if (remoteVideo) remoteVideo.srcObject = null;
+    document.getElementById('verification-code')?.classList.add('hidden');
+    document.getElementById('e2ee-badge')?.classList.add('hidden');
+    updateVideoSectionVisibility();
+  }
+
+  function stopLocalMedia() {
+    localStream?.getTracks().forEach((track) => track.stop());
+    localStream = null;
+    const localVideo = document.getElementById('local-video') as HTMLVideoElement | null;
+    if (localVideo) localVideo.srcObject = null;
+    videoEnabled = false;
+    setMicToggleState(true);
+    setVideoToggleState(false);
+    updateVideoSectionVisibility();
+  }
+
+  function cleanupPeerConnection() {
+    const currentPc = pc;
+    pc = null;
+
+    if (currentPc) {
+      currentPc.onicecandidate = null;
+      currentPc.ontrack = null;
+      currentPc.onconnectionstatechange = null;
+      currentPc.onnegotiationneeded = null;
+      currentPc.close();
+    }
+
+    pendingCandidates = [];
+    stopOrb?.();
+    stopOrb = null;
+    clearRemoteMedia();
+  }
+
+  function closeSocket() {
+    const currentWs = ws;
+    ws = null;
+
+    if (!currentWs) return;
+
+    currentWs.onopen = null;
+    currentWs.onerror = null;
+    currentWs.onmessage = null;
+    currentWs.onclose = null;
+
+    if (
+      currentWs.readyState === WebSocket.CONNECTING ||
+      currentWs.readyState === WebSocket.OPEN
+    ) {
+      currentWs.close();
+    }
+  }
+
+  const teardownSession = (silent = false) => {
+    if (sessionEnded) return;
+
+    sessionEnded = true;
+    cleanupPeerConnection();
+    stopLocalMedia();
+    closeSocket();
+
+    if (activeSessionTeardown === teardownSession) {
+      activeSessionTeardown = null;
+    }
+
+    if (!silent) {
+      setState('disconnected');
+      setStatusText('Disconnected');
+    }
+  };
+
+  function endSession(message: string) {
+    teardownSession(true);
+    setState('disconnected');
+    setStatusText(message);
+  }
+
+  function describeSocketClose(event: CloseEvent): string {
+    switch (event.code) {
+      case 4001:
+        return 'This room already has two participants.';
+      case 4002:
+      case 4003:
+        return 'This call link or PIN did not match.';
+      default:
+        return 'Connection failed.';
+    }
+  }
+
+  activeSessionTeardown = teardownSession;
+
+  const toggleMicButton = document.getElementById('toggle-mic') as HTMLButtonElement | null;
+  if (toggleMicButton) {
+    toggleMicButton.onclick = () => {
+      const track = localStream?.getAudioTracks()[0];
+      if (!track) return;
+
+      track.enabled = !track.enabled;
+      setMicToggleState(track.enabled);
+    };
+  }
+
+  const toggleVideoButton = document.getElementById('toggle-video') as HTMLButtonElement | null;
+  if (toggleVideoButton) {
+    toggleVideoButton.onclick = async () => {
+      if (sessionEnded) return;
+
+      if (!videoEnabled) {
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          });
+          const videoTrack = videoStream.getVideoTracks()[0];
+          if (!videoTrack || !localStream) {
+            videoStream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+
+          if (sessionEnded) {
+            videoStream.getTracks().forEach((track) => track.stop());
+            return;
+          }
+
+          localStream.addTrack(videoTrack);
+          pc?.addTrack(videoTrack, localStream);
+
+          if (supportsE2EE && pc && callKeyRaw) {
+            const sender = pc.getSenders().find((candidate) => candidate.track === videoTrack);
+            if (sender?.track) {
+              const worker = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
+              worker.postMessage({ type: 'setKey', key: callKeyRaw });
+              sender.transform = new RTCRtpScriptTransform(worker, { direction: 'encrypt', kind: 'video' });
+            }
+          }
+
+          const localVideo = document.getElementById('local-video') as HTMLVideoElement | null;
+          if (localVideo) {
+            localVideo.srcObject = new MediaStream([videoTrack]);
+            localVideo.play().catch(() => {});
+          }
+
+          videoEnabled = true;
+          setVideoToggleState(true);
+          updateVideoSectionVisibility();
+        } catch {
+          return;
+        }
+
+        return;
+      }
+
+      const videoTrack = localStream?.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.stop();
+        localStream?.removeTrack(videoTrack);
+        const sender = pc?.getSenders().find((candidate) => candidate.track === videoTrack);
+        if (sender) pc?.removeTrack(sender);
+      }
+
+      const localVideo = document.getElementById('local-video') as HTMLVideoElement | null;
+      if (localVideo) localVideo.srcObject = null;
+
+      videoEnabled = false;
+      setVideoToggleState(false);
+      updateVideoSectionVisibility();
+    };
+  }
+
+  const copyLinkButton = document.getElementById('copy-link') as HTMLButtonElement | null;
+  if (copyLinkButton) {
+    copyLinkButton.onclick = () => {
+      navigator.clipboard.writeText(window.location.href);
+    };
+  }
+
+  const copyInviteButton = document.getElementById('copy-btn') as HTMLButtonElement | null;
+  if (copyInviteButton) {
+    copyInviteButton.onclick = () => {
+      navigator.clipboard.writeText(window.location.href);
+      document.getElementById('copy-icon')?.classList.add('hidden');
+      document.getElementById('copied-icon')?.classList.remove('hidden');
+      setTimeout(() => {
+        document.getElementById('copy-icon')?.classList.remove('hidden');
+        document.getElementById('copied-icon')?.classList.add('hidden');
+      }, 2000);
+    };
+  }
+
+  const hangUpButton = document.getElementById('hang-up') as HTMLButtonElement | null;
+  if (hangUpButton) {
+    hangUpButton.onclick = () => {
+      endSession('Disconnected');
+    };
+  }
+
+  setMicToggleState(true);
+  setVideoToggleState(false);
 
   // 1. Get audio
   setState('requesting-media');
@@ -157,9 +388,18 @@ export async function initCall(
       video: false,
     });
   } catch {
-    setState('disconnected');
-    const s = document.getElementById('status-text');
-    if (s) s.textContent = 'Microphone access denied.';
+    if (!sessionEnded) {
+      setState('disconnected');
+      setStatusText('Microphone access denied.');
+    }
+    if (activeSessionTeardown === teardownSession) {
+      activeSessionTeardown = null;
+    }
+    return;
+  }
+
+  if (sessionEnded) {
+    stopLocalMedia();
     return;
   }
 
@@ -175,17 +415,29 @@ export async function initCall(
   } catch { /* */ }
 
   if (!iceServers.length) {
-    setState('disconnected');
-    const s = document.getElementById('status-text');
-    if (s) s.textContent = 'Failed to connect to relay server.';
+    endSession('Failed to connect to relay server.');
     return;
   }
 
   // 3. Derive keys from the public room ID plus the secret share link fragment.
-  const joinProof = await deriveAdmissionProof(roomId, shareSecret, pin);
-  const sigKey = await deriveSignalingKey(roomId, shareSecret, pin);
-  const callKey = await deriveCallKey(roomId, shareSecret, pin);
-  const callKeyRaw = await crypto.subtle.exportKey('raw', callKey);
+  let joinProof: string;
+  let sigKey: CryptoKey;
+  try {
+    joinProof = await deriveAdmissionProof(roomId, shareSecret, pin);
+    sigKey = await deriveSignalingKey(roomId, shareSecret, pin);
+    const callKey = await deriveCallKey(roomId, shareSecret, pin);
+    callKeyRaw = await crypto.subtle.exportKey('raw', callKey);
+  } catch {
+    endSession('Failed to initialize call encryption.');
+    return;
+  }
+
+  if (!callKeyRaw) {
+    endSession('Failed to initialize call encryption.');
+    return;
+  }
+
+  if (sessionEnded) return;
 
   // 4. Encrypted signaling helpers
   async function send(data: object) {
@@ -196,20 +448,23 @@ export async function initCall(
 
   // 5. WebRTC peer connection
   function createPC() {
+    if (pc) return pc;
+
     pendingCandidates = [];
 
-    pc = new RTCPeerConnection({
+    const nextPc = new RTCPeerConnection({
       iceServers,
       iceTransportPolicy: 'relay',
     });
+    pc = nextPc;
 
-    localStream!.getTracks().forEach((t) => pc!.addTrack(t, localStream!));
+    localStream?.getTracks().forEach((track) => nextPc.addTrack(track, localStream!));
 
-    pc.onicecandidate = (e) => {
+    nextPc.onicecandidate = (e) => {
       if (e.candidate) send({ type: 'candidate', candidate: e.candidate.toJSON() });
     };
 
-    pc.ontrack = (e) => {
+    nextPc.ontrack = (e) => {
       // Some browsers don't associate tracks with streams — build our own
       if (e.streams[0]) {
         remoteStream = e.streams[0];
@@ -235,11 +490,11 @@ export async function initCall(
           vid.srcObject = remoteStream;
           vid.play().catch(() => {});
         }
-        document.getElementById('video-section')?.classList.remove('hidden');
+        updateVideoSectionVisibility();
 
         // Apply E2EE to new video receiver (for renegotiation after initial connection)
-        if (supportsE2EE && pc?.connectionState === 'connected') {
-          const receiver = pc.getReceivers().find((r) => r.track === e.track);
+        if (supportsE2EE && nextPc.connectionState === 'connected') {
+          const receiver = nextPc.getReceivers().find((r) => r.track === e.track);
           if (receiver?.track) {
             const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
             w.postMessage({ type: 'setKey', key: callKeyRaw });
@@ -249,40 +504,40 @@ export async function initCall(
       }
     };
 
-    pc.onconnectionstatechange = () => {
-      if (pc?.connectionState === 'connected') {
+    nextPc.onconnectionstatechange = () => {
+      if (nextPc.connectionState === 'connected') {
         setState('connected');
         document.getElementById('share-section')?.classList.add('hidden');
 
         if (!stopOrb && remoteStream) stopOrb = startOrbReactivity(remoteStream);
 
         // Safety numbers
-        const local = pc.localDescription?.sdp || '';
-        const remote = pc.remoteDescription?.sdp || '';
+        const local = nextPc.localDescription?.sdp || '';
+        const remote = nextPc.remoteDescription?.sdp || '';
         computeVerificationCode(local, remote).then(showVerificationCode);
 
         // Apply E2EE
-        if (supportsE2EE) applyE2ee(pc, callKeyRaw);
+        if (supportsE2EE) applyE2ee(nextPc, callKeyRaw);
         else showE2eeBadge(false);
       }
-      if (pc?.connectionState === 'failed' || pc?.connectionState === 'disconnected') {
-        cleanup();
-        setState('disconnected');
+
+      if (nextPc.connectionState === 'failed' || nextPc.connectionState === 'disconnected') {
+        endSession('Connection lost.');
       }
     };
 
-    pc.onnegotiationneeded = async () => {
-      if (pc?.connectionState !== 'connected') return;
-      if (pc?.signalingState !== 'stable') return;
+    nextPc.onnegotiationneeded = async () => {
+      if (nextPc.connectionState !== 'connected') return;
+      if (nextPc.signalingState !== 'stable') return;
       try {
-        const offer = await pc!.createOffer();
-        if (pc?.signalingState !== 'stable') return;
-        await pc!.setLocalDescription(offer);
+        const offer = await nextPc.createOffer();
+        if (nextPc.signalingState !== 'stable') return;
+        await nextPc.setLocalDescription(offer);
         send({ type: 'offer', sdp: offer.sdp });
       } catch { /* ignore */ }
     };
 
-    return pc;
+    return nextPc;
   }
 
   // 6. Connect WebSocket
@@ -291,15 +546,19 @@ export async function initCall(
   joinUrl.searchParams.set('room', roomId);
   joinUrl.searchParams.set('proof', joinProof);
   ws = new WebSocket(joinUrl);
+  let socketErrored = false;
 
-  ws.onopen = () => setState('waiting');
+  ws.onopen = () => {
+    if (!sessionEnded) setState('waiting');
+  };
+
   ws.onerror = () => {
-    setState('disconnected');
-    const s = document.getElementById('status-text');
-    if (s) s.textContent = 'Connection failed.';
+    socketErrored = true;
   };
 
   ws.onmessage = async (event) => {
+    if (sessionEnded) return;
+
     let frame: unknown;
     try {
       frame = JSON.parse(event.data as string);
@@ -311,17 +570,15 @@ export async function initCall(
 
     if (frame.type === 'peer-joined') {
       // We were here first — create offer
-      createPC();
-      const offer = await pc!.createOffer();
-      await pc!.setLocalDescription(offer);
+      const connection = createPC();
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
       send({ type: 'offer', sdp: offer.sdp });
       return;
     }
 
     if (frame.type === 'peer-left') {
-      cleanup();
-      setState('waiting');
-      document.getElementById('share-section')?.classList.remove('hidden');
+      endSession('The other person left the call.');
       return;
     }
 
@@ -330,19 +587,20 @@ export async function initCall(
       if (!isSignalingMessage(msg)) return;
 
       if (msg.type === 'offer') {
-        if (!pc) createPC();
-        await pc!.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: msg.sdp }));
+        const connection = createPC();
+        await connection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: msg.sdp }));
         for (const c of pendingCandidates) {
-          await pc!.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          await connection.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
         }
         pendingCandidates = [];
-        const answer = await pc!.createAnswer();
-        await pc!.setLocalDescription(answer);
+        const answer = await connection.createAnswer();
+        await connection.setLocalDescription(answer);
         send({ type: 'answer', sdp: answer.sdp });
       } else if (msg.type === 'answer') {
-        await pc!.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
+        if (!pc) return;
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
         for (const c of pendingCandidates) {
-          await pc!.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
         }
         pendingCandidates = [];
       } else if (msg.type === 'candidate') {
@@ -357,110 +615,17 @@ export async function initCall(
     }
   };
 
-  ws.onclose = () => {
-    if (document.getElementById('app')?.dataset.state !== 'disconnected') {
-      cleanup();
-      setState('disconnected');
+  ws.onclose = (event) => {
+    if (!sessionEnded) {
+      endSession(socketErrored ? 'Connection failed.' : describeSocketClose(event));
     }
   };
 
-  // 7. Cleanup
-  function cleanup() {
-    pc?.close();
-    pc = null;
-    pendingCandidates = [];
-    stopOrb?.();
-    stopOrb = null;
-
-    const audio = document.getElementById('remote-audio') as HTMLAudioElement;
-    if (audio) audio.srcObject = null;
-    const video = document.getElementById('remote-video') as HTMLVideoElement;
-    if (video) video.srcObject = null;
-    document.getElementById('video-section')?.classList.add('hidden');
-    document.getElementById('verification-code')?.classList.add('hidden');
-    document.getElementById('e2ee-badge')?.classList.add('hidden');
+  if (sessionEnded) {
+    teardownSession(true);
+    return;
   }
 
-  // 8. UI controls
-  document.getElementById('toggle-mic')?.addEventListener('click', () => {
-    const t = localStream?.getAudioTracks()[0];
-    if (t) {
-      t.enabled = !t.enabled;
-      document.getElementById('toggle-mic')?.classList.toggle('control-off', !t.enabled);
-      document.getElementById('mic-on')?.classList.toggle('hidden', !t.enabled);
-      document.getElementById('mic-off')?.classList.toggle('hidden', t.enabled);
-    }
-  });
-
-  document.getElementById('toggle-video')?.addEventListener('click', async () => {
-    if (!videoEnabled) {
-      try {
-        const vs = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
-        });
-        const vt = vs.getVideoTracks()[0];
-        localStream?.addTrack(vt);
-        pc?.addTrack(vt, localStream!);
-
-        // Apply E2EE to new video sender
-        if (supportsE2EE && pc) {
-          const sender = pc.getSenders().find((s) => s.track === vt);
-          if (sender?.track) {
-            const w = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module' });
-            w.postMessage({ type: 'setKey', key: callKeyRaw });
-            sender.transform = new RTCRtpScriptTransform(w, { direction: 'encrypt', kind: 'video' });
-          }
-        }
-
-        const lv = document.getElementById('local-video') as HTMLVideoElement;
-        if (lv) {
-          lv.srcObject = new MediaStream([vt]);
-          lv.play().catch(() => {});
-        }
-        document.getElementById('video-section')?.classList.remove('hidden');
-        videoEnabled = true;
-        document.getElementById('toggle-video')?.classList.remove('control-off');
-        document.getElementById('vid-on')?.classList.remove('hidden');
-        document.getElementById('vid-off')?.classList.add('hidden');
-      } catch { /* camera denied */ }
-    } else {
-      const vt = localStream?.getVideoTracks()[0];
-      if (vt) {
-        vt.stop();
-        localStream?.removeTrack(vt);
-        const sender = pc?.getSenders().find((s) => s.track === vt);
-        if (sender) pc?.removeTrack(sender);
-      }
-      videoEnabled = false;
-      document.getElementById('toggle-video')?.classList.add('control-off');
-      document.getElementById('vid-on')?.classList.add('hidden');
-      document.getElementById('vid-off')?.classList.remove('hidden');
-      const rv = document.getElementById('remote-video') as HTMLVideoElement;
-      if (!rv?.srcObject || !(rv.srcObject as MediaStream).getVideoTracks().length) {
-        document.getElementById('video-section')?.classList.add('hidden');
-      }
-    }
-  });
-
-  document.getElementById('copy-link')?.addEventListener('click', () => {
-    navigator.clipboard.writeText(window.location.href);
-  });
-
-  document.getElementById('copy-btn')?.addEventListener('click', () => {
-    navigator.clipboard.writeText(window.location.href);
-    document.getElementById('copy-icon')?.classList.add('hidden');
-    document.getElementById('copied-icon')?.classList.remove('hidden');
-    setTimeout(() => {
-      document.getElementById('copy-icon')?.classList.remove('hidden');
-      document.getElementById('copied-icon')?.classList.add('hidden');
-    }, 2000);
-  });
-
-  document.getElementById('hang-up')?.addEventListener('click', () => {
-    cleanup();
-    localStream?.getTracks().forEach((t) => t.stop());
-    ws?.close();
-    ws = null;
-    setState('disconnected');
-  });
+  // Keep the session reachable for later navigation teardown.
+  activeSessionTeardown = teardownSession;
 }
