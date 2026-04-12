@@ -5,7 +5,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
 <Layout title="Telvy">
   <div id="app" data-state="idle" class="flex flex-col min-h-screen">
-    <header class="flex items-center justify-between px-6 py-4 animate-fade-in">
+    <header class="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 animate-fade-in">
       <a href="/" class="text-xl font-bold tracking-tight">
         Tel<span class="text-primary">vy</span>
       </a>
@@ -15,30 +15,42 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
     </header>
 
-    <main class="flex-1 flex flex-col items-center justify-center px-4 -mt-16">
-      <div id="room-display" class="mb-6 text-center hidden animate-fade-in">
-        <p id="room-id" class="text-2xl font-semibold tracking-wide text-gray-800"></p>
+    <main class="flex-1 flex flex-col items-center justify-center px-4 pt-4 pb-28 sm:px-6 sm:pb-32">
+      <div id="room-display" class="mb-5 w-full max-w-md text-center hidden animate-fade-in">
+        <p id="room-id" class="text-xl font-semibold tracking-wide text-gray-800 sm:text-2xl"></p>
         <div class="flex items-center justify-center gap-2 mt-2">
           <span id="status-dot" class="status-dot"></span>
           <span id="status-text" class="text-sm text-gray-500"></span>
         </div>
       </div>
 
-      <div class="orb-container animate-scale-in">
+      <div id="call-stage" class="orb-container animate-scale-in">
         <div class="orb-ring orb-ring-1"></div>
         <div class="orb-ring orb-ring-2"></div>
         <div class="orb-ring orb-ring-3"></div>
         <button id="orb-button" class="orb-button" title="Start a call" aria-label="Start a secure call">
           <Mic class="w-10 h-10" />
         </button>
+        <div id="call-media-stage" class="call-media-stage hidden" data-mode="audio" data-remote-video="false">
+          <div id="call-media-shell" class="call-media-shell">
+            <div id="call-media-placeholder" class="call-media-placeholder" aria-hidden="true">
+              <span id="stage-mic-icon" class="call-media-icon"><Mic class="w-12 h-12 sm:w-14 sm:h-14" /></span>
+              <span id="stage-video-icon" class="call-media-icon hidden"><Video class="w-12 h-12 sm:w-14 sm:h-14" /></span>
+            </div>
+            <video id="remote-video" autoplay playsinline class="call-media-video hidden" aria-label="Remote video"></video>
+          </div>
+          <div id="local-preview-shell" class="local-preview-shell hidden">
+            <video id="local-video" autoplay playsinline muted class="w-full h-full object-cover" aria-label="Your video preview"></video>
+          </div>
+        </div>
       </div>
 
-      <div id="landing-cta" class="mt-8 text-center animate-fade-in-up" style="animation-delay: 0.15s">
-        <p class="text-gray-500 text-lg">Tap to start a new call</p>
+      <div id="landing-cta" class="mt-6 text-center animate-fade-in-up" style="animation-delay: 0.15s">
+        <p class="text-base text-gray-500 sm:text-lg">Tap to start a new call</p>
       </div>
 
       <div id="phrase-section" class="mt-4 w-full max-w-sm animate-fade-in">
-        <form id="phrase-form" class="flex items-center gap-2">
+        <form id="phrase-form" class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
           <input id="room-phrase-input" type="text" placeholder="Or enter the 3-word phrase" autocomplete="off"
             class="flex-1 text-center text-sm bg-gray-50 rounded-lg px-4 py-2 border border-gray-200 focus:outline-none focus:border-primary/50 transition-colors" />
           <button id="join-call-btn" type="submit"
@@ -49,10 +61,10 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
         <p id="phrase-error" class="mt-2 text-center text-sm text-red-600 hidden"></p>
       </div>
 
-      <div id="share-section" class="mt-8 text-center hidden">
+      <div id="share-section" class="mt-6 w-full max-w-sm text-center hidden">
         <p class="text-sm text-gray-500 mb-3">Share these 3 words</p>
-        <div class="inline-flex items-center gap-2 bg-gray-50 rounded-xl px-4 py-2.5 border border-gray-200">
-          <span id="share-phrase" class="text-sm font-mono text-gray-700 max-w-xs truncate"></span>
+        <div class="inline-flex max-w-full items-center gap-2 bg-gray-50 rounded-xl px-4 py-2.5 border border-gray-200">
+          <span id="share-phrase" class="text-sm font-mono text-gray-700 max-w-[15rem] truncate sm:max-w-xs"></span>
           <button id="copy-btn" class="text-gray-400 hover:text-primary transition-colors relative" title="Copy phrase">
             <span id="copy-icon"><Copy class="w-4 h-4" /></span>
             <span id="copied-icon" class="hidden"><Check class="w-4 h-4 text-secure" /></span>
@@ -63,7 +75,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
       <div id="verification-panel" class="mt-6 max-w-sm w-full text-center hidden animate-fade-in">
         <p class="text-xs font-semibold tracking-[0.16em] text-secure uppercase">Verify Before You Talk</p>
-        <div class="mt-3 flex items-center justify-center gap-3 bg-secure/5 border border-secure/20 rounded-2xl px-4 py-3">
+        <div class="mt-3 flex flex-col items-center justify-center gap-3 bg-secure/5 border border-secure/20 rounded-2xl px-4 py-3 sm:flex-row">
           <span id="verification-code" class="text-xl font-mono font-semibold tracking-[0.24em] text-secure"></span>
           <button id="verify-call" type="button"
             class="px-3 py-1.5 text-xs font-medium rounded-full border border-secure/25 text-secure hover:bg-secure/10 transition-colors">
@@ -73,7 +85,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
         <p id="verification-hint" class="mt-2 text-sm text-gray-500">Read this code aloud on both devices. Matching numbers detect active interception.</p>
       </div>
 
-      <div id="controls" class="mt-10 flex items-center gap-3 hidden animate-fade-in-up">
+      <div id="controls" class="mt-8 flex flex-wrap items-center justify-center gap-3 hidden animate-fade-in-up sm:mt-10">
         <button id="toggle-mic" class="control-btn" title="Toggle microphone">
           <span id="mic-on"><Mic class="w-5 h-5" /></span>
           <span id="mic-off" class="hidden"><MicOff class="w-5 h-5" /></span>
@@ -92,15 +104,6 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
       <audio id="remote-audio" autoplay playsinline></audio>
 
-      <div id="video-section" class="relative hidden mt-8 w-full max-w-2xl animate-scale-in">
-        <div class="relative aspect-video bg-gray-100 rounded-2xl overflow-hidden border border-gray-200">
-          <video id="remote-video" autoplay playsinline class="w-full h-full object-cover"></video>
-        </div>
-        <div class="absolute bottom-4 right-4 w-40 aspect-video bg-gray-100 rounded-xl overflow-hidden border border-gray-200 shadow-lg">
-          <video id="local-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
-        </div>
-      </div>
-
       <div id="ended-section" class="mt-8 text-center hidden animate-fade-in">
         <p class="text-gray-500 text-lg mb-4">Call ended</p>
         <button id="new-call-btn" class="px-6 py-2.5 bg-primary text-white rounded-xl font-medium hover:bg-primary-hover transition-colors">
@@ -109,14 +112,14 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       </div>
     </main>
 
-    <div id="e2ee-badge" class="hidden fixed bottom-24 left-1/2 -translate-x-1/2 animate-fade-in">
+    <div id="e2ee-badge" class="hidden fixed bottom-24 left-1/2 z-20 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 animate-fade-in sm:bottom-20">
       <div class="flex items-center gap-1.5 bg-white rounded-full px-3 py-1.5 border border-gray-200 shadow-sm">
         <Shield class="w-3 h-3 text-secure" />
         <span id="e2ee-status" class="text-xs text-secure font-medium">E2EE</span>
       </div>
     </div>
 
-    <section class="px-6 pb-8 max-w-2xl mx-auto w-full animate-fade-in" style="animation-delay: 0.3s">
+    <section class="px-4 pb-8 max-w-2xl mx-auto w-full animate-fade-in sm:px-6" style="animation-delay: 0.3s">
       <details class="rounded-xl border border-gray-200 group">
         <summary class="p-5 cursor-pointer flex items-center justify-between hover:bg-gray-50 rounded-xl transition-colors">
           <div class="flex items-center gap-3">
@@ -174,6 +177,7 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
     const app = document.getElementById('app')!;
     const orbButton = document.getElementById('orb-button')!;
+    const callMediaStage = document.getElementById('call-media-stage');
     const phraseInput = document.getElementById('room-phrase-input') as HTMLInputElement | null;
     const phraseError = document.getElementById('phrase-error');
 
@@ -231,6 +235,8 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       setPhraseError('');
       if (phraseInput) phraseInput.value = formattedPhrase;
 
+      orbButton.classList.add('hidden');
+      callMediaStage?.classList.remove('hidden');
       document.getElementById('room-id')!.textContent = formattedPhrase;
       document.getElementById('share-phrase')!.textContent = formattedPhrase;
       document.getElementById('room-display')!.classList.remove('hidden');
@@ -246,6 +252,8 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
     function showJoinError(message: string, roomPhrase?: string) {
       app.dataset.state = 'disconnected';
+      orbButton.classList.add('hidden');
+      callMediaStage?.classList.add('hidden');
       document.getElementById('room-id')!.textContent = roomPhrase ? formatRoomPhrase(roomPhrase) : 'Call unavailable';
       document.getElementById('room-display')!.classList.remove('hidden');
       document.getElementById('status-dot')!.className = 'status-dot disconnected';
@@ -260,11 +268,12 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
 
     function resetToLanding() {
       app.dataset.state = 'idle';
+      orbButton.classList.remove('hidden');
+      callMediaStage?.classList.add('hidden');
       document.getElementById('room-display')!.classList.add('hidden');
       document.getElementById('phrase-section')!.classList.remove('hidden');
       document.getElementById('share-section')!.classList.add('hidden');
       document.getElementById('controls')!.classList.add('hidden');
-      document.getElementById('video-section')!.classList.add('hidden');
       document.getElementById('verification-panel')!.classList.add('hidden');
       document.getElementById('ended-section')!.classList.add('hidden');
       document.getElementById('e2ee-badge')!.classList.add('hidden');
@@ -276,10 +285,10 @@ import { Shield, Mic, MicOff, Video, VideoOff, PhoneOff, Copy, Check, CheckCircl
       const nextUrl = new URL(location.href);
       const nextPhrase = parseCallUrl(nextUrl);
 
-      if (nextPhrase) {
-        startCall(nextPhrase);
+      if (nextPhrase.roomPhrase) {
+        startCall(nextPhrase.roomPhrase);
       } else if (nextUrl.hash) {
-        showJoinError('This call phrase is invalid.');
+        showJoinError(getRoomPhraseErrorMessage(nextPhrase.error));
       } else {
         resetToLanding();
       }
